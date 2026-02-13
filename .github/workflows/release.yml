@@ -3,9 +3,6 @@ name: release
 on:
   push:
     branches: ["master"]
-    paths-ignore:
-      - "CHANGELOG.md"
-      - "pyproject.toml"
 
 permissions:
   contents: write
