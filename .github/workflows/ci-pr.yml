@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -31,15 +33,34 @@ jobs:
         run: |
           uv run --with pytest --with jinja2 pytest -q tests/unit/test_quality_builder.py
 
-      - name: Quality report
+      - name: Generate changelog preview
+        id: changelog
+        uses: ./actions/release/changelog-conventional-commit
+        with:
+          mode: "pr"
+          branch: ${{ github.head_ref }}
+          version: "UNRELEASED"
+          base-ref: origin/${{ github.base_ref }}
+          output: changelog_preview.md
+
+      - name: Publish PR changelog comment
+        if: ${{ github.event_name == 'pull_request' && always() }}
+        uses: ./actions/core/pr-comment-update
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          tags: "<!-- changelog-preview -->,<!-- branch-source:${{ github.head_ref }} -->"
+          body-file: ${{ steps.changelog.outputs.output_path }}
+
+      - name: Quality report (strict gate)
         id: quality
+        continue-on-error: true
         uses: ./actions/python/quality-report
         with:
           src-dir: examples/sample_project/src
           test-dir: examples/sample_project/tests
           coverage-threshold: "70"
-          fail-on-quality: "none"
-          fail-on-security: "none"
+          fail-on-quality: "any"
+          fail-on-security: "high"
           include-security: "true"
 
       - name: Publish PR quality comment
@@ -49,3 +70,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           tags: "<!-- loom-quality-report -->"
           body-file: ${{ steps.quality.outputs.report-file }}
+
+      - name: Enforce quality gate
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.quality.outputs.blocking }}" = "true" ]; then
+            echo "Blocking quality/security conditions detected"
+            exit 1
+          fi

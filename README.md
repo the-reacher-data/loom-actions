@@ -1,9 +1,11 @@
 # loom-actions
 
-![CI PR](https://github.com/loom/loom-actions/actions/workflows/ci-pr.yml/badge.svg)
-![CI Main](https://github.com/loom/loom-actions/actions/workflows/ci-main.yml/badge.svg)
-![Release](https://github.com/loom/loom-actions/actions/workflows/release.yml/badge.svg)
-![License](https://img.shields.io/github/license/loom/loom-actions)
+![CI PR](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-pr.yml/badge.svg)
+![CI Main](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-main.yml/badge.svg)
+![Release](https://github.com/the-reacher-data/loom-actions/actions/workflows/release.yml/badge.svg)
+![Pyright](https://img.shields.io/badge/type%20checker-pyright-blue)
+![Ruff](https://img.shields.io/badge/lint-ruff-%23D7FF64)
+![License](https://img.shields.io/github/license/the-reacher-data/loom-actions)
 
 Reusable GitHub Actions for Python projects using Trunk-Based Development and Conventional Commits.
 
@@ -11,7 +13,7 @@ Reusable GitHub Actions for Python projects using Trunk-Based Development and Co
 
 - Trunk-based release flow on `main`
 - Semantic versioning from merged branch name
-- Changelog generation from Conventional Commits
+- Changelog generation from Conventional Commits + PR preview comment
 - Unified Python quality report in PRs (ruff + pyright + pytest/coverage + bandit)
 - Local and CI test strategy (`make` + `act` + GitHub workflows)
 
@@ -63,7 +65,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Quality report
-        uses: loom/loom-actions/actions/python/quality-report@v1
+        uses: the-reacher-data/loom-actions/actions/python/quality-report@v1
         with:
           src-dir: src
           test-dir: tests
@@ -78,13 +80,13 @@ jobs:
 ```yaml
 - name: Compute version
   id: version
-  uses: loom/loom-actions/actions/release/versioning-branch-semantic@v1
+  uses: the-reacher-data/loom-actions/actions/release/versioning-branch-semantic@v1
   with:
     branch: feature/my-change
     prerelease: "false"
 
 - name: Generate changelog
-  uses: loom/loom-actions/actions/release/changelog-conventional-commit@v1
+  uses: the-reacher-data/loom-actions/actions/release/changelog-conventional-commit@v1
   with:
     mode: release
     branch: feature/my-change
@@ -111,7 +113,7 @@ make act-smoke
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci-pr.yml` | `pull_request` | Validate actions and run unit/smoke checks |
+| `ci-pr.yml` | `pull_request` | Validate actions, publish changelog+quality PR comments, enforce gates |
 | `ci-main.yml` | `push` on `main` | Mainline validation with stricter smoke checks |
 | `release.yml` | `push` on `main` | Compute version, generate changelog, tag, publish GitHub release |
 | `act-unit-builder.yml` | local/PR | Unit tests intended for `act` |
@@ -121,6 +123,6 @@ make act-smoke
 
 - Trunk-based flow: merge to `main`, then release workflow creates tags.
 - Intended external consumption pattern:
-  - `loom/loom-actions/actions/python/quality-report@v1`
-  - `loom/loom-actions/actions/release/versioning-branch-semantic@v1`
+  - `the-reacher-data/loom-actions/actions/python/quality-report@v1`
+  - `the-reacher-data/loom-actions/actions/release/versioning-branch-semantic@v1`
 - Keep major tags (`v1`, `v2`) stable and move them only on compatible releases.
