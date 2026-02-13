@@ -2,7 +2,7 @@ name: release
 
 on:
   push:
-    branches: ["main"]
+    branches: ["master"]
     paths-ignore:
       - "CHANGELOG.md"
       - "pyproject.toml"
@@ -86,7 +86,7 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           branch: release/${{ steps.version.outputs.version }}
-          base: main
+          base: master
           title: "chore(release): prepare v${{ steps.version.outputs.version }} [automated]"
           body: |
             This PR was created automatically by the `release` workflow.
