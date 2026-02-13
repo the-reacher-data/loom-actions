@@ -35,10 +35,10 @@ def _default_repo_url() -> str:
     return f"{server}/{repo}" if repo else server
 
 
-def get_commits_pr(branch: str) -> list[dict[str, str]]:
-    """Retrieve commits for a PR branch compared to origin/main."""
+def get_commits_pr(branch: str, base_ref: str) -> list[dict[str, str]]:
+    """Retrieve commits for a PR branch compared to base_ref."""
     base = subprocess.check_output(
-        ["git", "merge-base", branch, "origin/main"], text=True
+        ["git", "merge-base", branch, base_ref], text=True
     ).strip()
     raw = subprocess.check_output(
         ["git", "log", f"{base}..HEAD", "--pretty=format:%h|%H|%s|%b---END---"],
@@ -206,11 +206,17 @@ def main() -> None:
     parser.add_argument(
         "--repo-url", default=_default_repo_url(), help="Repository URL"
     )
+    parser.add_argument(
+        "--base-ref",
+        required=False,
+        default="origin/main",
+        help="Base ref used in PR mode (e.g. origin/main)",
+    )
     args = parser.parse_args()
 
     is_unreleased = str(args.version).upper() == "UNRELEASED"
     if args.mode == "pr":
-        commits = get_commits_pr(args.branch)
+        commits = get_commits_pr(args.branch, args.base_ref)
         grouped = group_commits(commits)
         version = (
             args.version

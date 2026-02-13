@@ -15,6 +15,19 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -z "${{ inputs.body-file }}" ]; then
+          echo "body-file input is empty"
+          exit 1
+        fi
+        if [ ! -f "${{ inputs.body-file }}" ]; then
+          echo "body-file not found: ${{ inputs.body-file }}"
+          exit 1
+        fi
+
     - name: Update or create comment
       uses: actions/github-script@v7
       with:
