@@ -1,0 +1,114 @@
+# Python Quality Report
+
+{% if blocking %}❌ Blocking issues found.{% else %}✅ Quality gates passed.{% endif %}
+
+## Summary
+
+| Metric | Value |
+|---|---:|
+| ✅ Passed tests | **{{ summary.tests_passed }}** |
+| ❌ Failed tests | **{{ summary.tests_failed }}** |
+| ⏭ Skipped tests | **{{ summary.tests_skipped }}** |
+| 🧪 Total tests | **{{ summary.tests_total }}** |
+| 📈 Coverage | **{{ summary.coverage }}%** |
+| 🧹 Ruff issues | **{{ summary.ruff_issues }}** |
+| 🧠 Pyright errors | **{{ summary.pyright_errors }}** |
+| 🧠 Pyright warnings | **{{ summary.pyright_warnings }}** |
+| 🔒 Bandit issues | **{{ summary.bandit_issues }}** |
+
+## Gates
+
+- Quality gate: {{ "❌ fail" if quality_blocking else "✅ pass" }}
+- Security gate: {{ "❌ fail" if security_blocking else "✅ pass" }}
+
+---
+
+<h3>
+  <img src="https://raw.githubusercontent.com/pytest-dev/pytest/main/doc/en/img/pytest_logo_curves.svg" alt="pytest" height="26"/>
+  Tests & Coverage
+</h3>
+
+{% if failed_tests|length == 0 %}
+✅ No failed tests.
+{% else %}
+<details>
+<summary>❌ Failed tests ({{ failed_tests|length }})</summary>
+
+| Test | Message |
+|---|---|
+{% for f in failed_tests -%}
+| `{{ f.nodeid }}` | {{ f.message }} |
+{% endfor %}
+</details>
+{% endif %}
+
+{% if below_threshold|length == 0 %}
+✅ All files meet coverage threshold ({{ coverage_threshold }}%).
+{% else %}
+<details>
+<summary>⚠️ Files below coverage threshold ({{ coverage_threshold }}%)</summary>
+
+| File | Coverage | Missing lines |
+|---|---:|---|
+{% for f in below_threshold -%}
+| `{{ f.path }}` | {{ f.percent }}% | {{ f.missing_lines|join(', ') }} |
+{% endfor %}
+</details>
+{% endif %}
+
+<h3>
+  <img src="https://github.com/astral-sh/ruff/blob/main/docs/assets/ruff-favicon.png?raw=true" alt="ruff" height="24"/>
+  Ruff
+</h3>
+
+{% if ruff_findings|length == 0 %}
+✅ No Ruff issues found.
+{% else %}
+<details>
+<summary>🔎 Ruff findings ({{ ruff_findings|length }})</summary>
+
+| File | Line | Rule | Message |
+|---|---:|---|---|
+{% for i in ruff_findings -%}
+| `{{ i.filename }}` | {{ i.location.row }} | {{ i.code }} | {{ i.message }} |
+{% endfor %}
+</details>
+{% endif %}
+
+<h3>
+  <img src="https://raw.githubusercontent.com/microsoft/pyright/main/docs/img/pyright-logo-color.png" alt="pyright" height="24"/>
+  Pyright
+</h3>
+
+{% if pyright_findings|length == 0 %}
+✅ No Pyright diagnostics.
+{% else %}
+<details>
+<summary>🔎 Pyright diagnostics ({{ pyright_findings|length }})</summary>
+
+| File | Line | Severity | Rule | Message |
+|---|---:|---|---|---|
+{% for d in pyright_findings -%}
+| `{{ d.file }}` | {{ d.line }} | {{ d.severity }} | {{ d.rule }} | {{ d.message }} |
+{% endfor %}
+</details>
+{% endif %}
+
+<h3>
+  <img src="https://raw.githubusercontent.com/PyCQA/bandit/main/logo/logomark.png" alt="bandit" height="22"/>
+  Security (Bandit)
+</h3>
+
+{% if bandit_issues|length == 0 %}
+✅ No Bandit issues found.
+{% else %}
+<details>
+<summary>🛡️ Bandit findings ({{ bandit_issues|length }})</summary>
+
+| File | Line | Severity | Confidence | Test | Message |
+|---|---:|---|---|---|---|
+{% for i in bandit_issues -%}
+| `{{ i.filename }}` | {{ i.line_number }} | {{ i.severity }} | {{ i.confidence }} | {{ i.test_id }} | {{ i.issue_text }} |
+{% endfor %}
+</details>
+{% endif %}

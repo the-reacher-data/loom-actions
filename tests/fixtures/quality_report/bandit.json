@@ -1,0 +1,13 @@
+{
+  "results": [
+    {
+      "filename": "src/sample_pkg/module.py",
+      "line_number": 22,
+      "issue_severity": "MEDIUM",
+      "issue_confidence": "HIGH",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions",
+      "issue_text": "Possible SQL injection vector"
+    }
+  ]
+}

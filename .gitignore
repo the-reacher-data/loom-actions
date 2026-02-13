@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+coverage.json
+junit.xml
+dist/
+build/
+node_modules/
+.DS_Store
+uv.lock

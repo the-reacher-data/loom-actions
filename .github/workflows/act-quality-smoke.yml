@@ -1,0 +1,28 @@
+name: act-quality-smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run quality action on fixture project
+        uses: ./actions/python/quality-report
+        id: quality
+        with:
+          src-dir: examples/sample_project/src
+          test-dir: examples/sample_project/tests
+          coverage-threshold: "70"
+          fail-on-quality: "none"
+          fail-on-security: "none"
+          include-security: "true"
+
+      - name: Show report
+        run: cat "${{ steps.quality.outputs.report-file }}"
+
+      - name: Show summary JSON
+        run: cat "${{ steps.quality.outputs.summary-file }}"

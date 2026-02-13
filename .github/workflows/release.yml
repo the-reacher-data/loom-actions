@@ -1,0 +1,78 @@
+name: release
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Detect merged branch from latest merge commit message
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          MSG=$(git log -1 --pretty=%B)
+          BRANCH=$(echo "$MSG" | sed -nE "s/.*from [^/]+\/(.*)$/\1/p" | head -n1)
+          if [ -z "$BRANCH" ]; then
+            BRANCH="main"
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Compute version from branch semantic rules
+        id: version
+        uses: ./actions/release/versioning-branch-semantic
+        with:
+          branch: ${{ steps.detect.outputs.branch }}
+          prerelease: "false"
+
+      - name: Generate changelog
+        id: changelog
+        uses: ./actions/release/changelog-conventional-commit
+        with:
+          mode: "release"
+          branch: ${{ steps.detect.outputs.branch }}
+          version: ${{ steps.version.outputs.version }}
+          output: CHANGELOG_RELEASE.md
+
+      - name: Create and push tags
+        if: ${{ steps.version.outputs.deploy == 'true' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+          MAJOR=$(echo "${VERSION}" | cut -d. -f1)
+          git push origin ":refs/tags/v${MAJOR}" || true
+          git tag -fa "v${MAJOR}" -m "Release v${VERSION}"
+          git push origin "v${MAJOR}" --force
+
+      - name: Create GitHub release
+        if: ${{ steps.version.outputs.deploy == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body_path: CHANGELOG_RELEASE.md

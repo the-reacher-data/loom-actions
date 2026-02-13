@@ -1,0 +1,97 @@
+{% if is_unreleased and squash %}
+# ✨ {{version}} ([#{{ pr_number }}]({{ repo_url }}/pull/{{ pr_number }})) ([`{{ squash.sha }}`]({{ repo_url }}/commit/{{ squash.sha_full }}))
+{% elif not is_unreleased and squash %}
+# 🚀 Release {{ version }} ([#{{ pr_number }}]({{ repo_url }}/pull/{{ pr_number }})) ([`{{ squash.sha }}`]({{ repo_url }}/commit/{{ squash.sha_full }}))
+{% elif is_unreleased and not squash %}
+# ✨ {{version}}
+{% else %}
+# 🚀 {{ version }}
+{% endif %}
+
+{% macro render_items(items, squash) -%}
+{% for c in items -%}
+- {% if c.scope != "(no scope)" %}**{{ c.scope }}:** {% endif %}{{ c.title }}{% if not squash and c.sha %}([`{{ c.sha }}`]({{ repo_url }}/commit/{{ c.sha_full }})){% endif %}
+{% if c.body %}<br>
+  {% for line in c.body.splitlines() %}
+    {% if line.startswith('- ') %}
+  - {{ line[2:] }}
+    {% else %}
+  > {{ line }}
+    {% endif %}
+  {% endfor %}
+{% endif %}
+
+{% endfor %}
+{%- endmacro %}
+
+{% if commits.get("feat") %}
+## ✨ Features
+{% for scope, items in commits["feat"].items() %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("fix") %}
+## 🐛 Fixes
+{% for scope, items in commits["fix"].items() %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("docs") %}
+## 📖 Documentation
+{% for scope, items in commits["docs"].items() %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("style") %}
+## 🎨 Style
+{% for scope, items in commits["style"].items() %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("refactor") %}
+## ♻️ Refactor
+{% for scope, items in commits["refactor"].items() %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("perf") %}
+## ⚡ Performance
+{% for scope, items in commits["perf"].items() %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("test") %}
+## ✅ Tests
+{% for scope, items in commits["test"].items() %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("chore") %}
+## 🛠 Chores
+{% for scope, items in commits["chore"].items() %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("other") %}
+## 🔖 Other
+{% for scope, items in commits["other"].items() %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endfor %}
+{% endif %}

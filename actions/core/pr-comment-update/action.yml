@@ -1,0 +1,43 @@
+name: "PR Comment Update"
+description: "Create or update a PR/Issue comment identified by hidden HTML tags"
+
+inputs:
+  github-token:
+    description: "GitHub token"
+    required: true
+  tags:
+    description: "Comma-separated list of hidden tags"
+    required: true
+  body-file:
+    description: "Markdown file path"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Update or create comment
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const tags = `${{ inputs.tags }}`.split(',').map(t => t.trim()).filter(Boolean);
+          if (tags.length === 0) {
+            core.setFailed('No tags provided');
+            return;
+          }
+
+          const body = fs.readFileSync('${{ inputs.body-file }}', 'utf8');
+          const full = `${tags.join('\n')}\n${body}`;
+
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+
+          const existing = comments.find(c => c.body && tags.every(t => c.body.includes(t)));
+
+          if (existing) {
+            await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: full });
+          } else {
+            await github.rest.issues.createComment({ owner, repo, issue_number, body: full });
+          }
