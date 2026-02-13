@@ -60,3 +60,42 @@ def test_render_pr_mode_includes_stable_pr_files_link() -> None:
 
     assert "/pull/42" in markdown
     assert "/pull/42/files" in markdown
+
+
+def test_render_hides_no_scope_heading_and_shows_unscoped_first() -> None:
+    cli = _load_changelog_cli_module()
+    grouped = {
+        "feat": {
+            "api": [
+                {
+                    "title": "scoped change",
+                    "scope": "api",
+                    "body": "",
+                    "sha": "bbb2222",
+                    "sha_full": "bbb2222abcdef",
+                }
+            ],
+            "(no scope)": [
+                {
+                    "title": "unscoped change",
+                    "scope": "(no scope)",
+                    "body": "",
+                    "sha": "aaa1111",
+                    "sha_full": "aaa1111abcdef",
+                }
+            ],
+        }
+    }
+
+    markdown = cli.render(
+        template_path=cli.DEFAULT_TEMPLATE,
+        version="1.2.3",
+        commits=grouped,
+        repo_url="https://github.com/the-reacher-data/loom-actions",
+        squash=None,
+        is_unreleased=True,
+        pr_number=42,
+    )
+
+    assert "### (no scope)" not in markdown
+    assert markdown.index("unscoped change") < markdown.index("### api")
