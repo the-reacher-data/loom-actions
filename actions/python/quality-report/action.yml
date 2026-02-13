@@ -77,7 +77,7 @@ runs:
 
         run_check "ruff" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' ruff check '${{ inputs.src-dir }}' --output-format json > ruff.json" "ruff.json"
         run_check "pyright" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' pyright '${{ inputs.src-dir }}' --outputjson > pyright.json" "pyright.json"
-        run_check "pytest" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' pytest '${{ inputs.test-dir }}' --cov='${{ inputs.src-dir }}' --cov-report=json:coverage.json --cov-report=xml:coverage.xml --junit-xml=junit.xml -o junit_family=legacy -v --tb=short" "junit.xml,coverage.json,coverage.xml"
+        run_check "pytest" "PYTHONPATH='${{ inputs.src-dir }}:'${PYTHONPATH:-} uv run --with-requirements '${{ github.action_path }}/requirements.txt' pytest '${{ inputs.test-dir }}' --cov='${{ inputs.src-dir }}' --cov-report=json:coverage.json --cov-report=xml:coverage.xml --junit-xml=junit.xml -o junit_family=legacy -v --tb=short" "junit.xml,coverage.json,coverage.xml"
 
         if [ "${{ inputs.include-security }}" = "true" ]; then
           run_check "bandit" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' bandit -r '${{ inputs.src-dir }}' -f json -o bandit.json" "bandit.json"

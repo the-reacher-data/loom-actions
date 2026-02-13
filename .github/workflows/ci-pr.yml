@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   validate:
@@ -30,7 +31,8 @@ jobs:
         run: |
           uv run --with pytest --with jinja2 pytest -q tests/unit/test_quality_builder.py
 
-      - name: Smoke quality action
+      - name: Quality report
+        id: quality
         uses: ./actions/python/quality-report
         with:
           src-dir: examples/sample_project/src
@@ -39,3 +41,11 @@ jobs:
           fail-on-quality: "none"
           fail-on-security: "none"
           include-security: "true"
+
+      - name: Publish PR quality comment
+        if: ${{ github.event_name == 'pull_request' && always() }}
+        uses: ./actions/core/pr-comment-update
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          tags: "<!-- loom-quality-report -->"
+          body-file: ${{ steps.quality.outputs.report-file }}
