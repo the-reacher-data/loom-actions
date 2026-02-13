@@ -1,6 +1,6 @@
 [project]
 name = "loom-actions"
-version = "0.1.0"
+version = "0.1.1"
 description = "Reusable GitHub Actions for Python OSS workflows"
 requires-python = ">=3.11"
 
@@ -9,8 +9,17 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W", "UP", "B"]
-ignore = ["E501"]
+select = [
+    "E",
+    "F",
+    "I",
+    "W",
+    "UP",
+    "B",
+]
+ignore = [
+    "E501",
+]
 
 [tool.semantic_branch]
 prerelease = [
