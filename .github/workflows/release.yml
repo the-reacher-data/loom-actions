@@ -87,14 +87,22 @@ jobs:
         with:
           branch: release/${{ steps.version.outputs.version }}
           base: main
-          title: "chore(release): ${{ steps.version.outputs.version }} (#${{ needs.detect.outputs.pr_number }})"
+          title: "chore(release): prepare v${{ steps.version.outputs.version }} [automated]"
           body: |
-            Automated release PR for version **${{ steps.version.outputs.version }}**.
-            Source PR: #${{ needs.detect.outputs.pr_number }}
+            This PR was created automatically by the `release` workflow.
+
+            Release target: **v${{ steps.version.outputs.version }}**
+            Trigger source PR: #${{ needs.detect.outputs.pr_number }}
+            Trigger source branch: `${{ needs.detect.outputs.branch }}`
+
+            Files expected in this PR:
+            - `CHANGELOG.md`
+            - `pyproject.toml`
           draft: false
           delete-branch: true
           add-paths: CHANGELOG.md,pyproject.toml
-          commit-message: "chore(release): ${{ steps.version.outputs.version }} (#${{ needs.detect.outputs.pr_number }})"
+          labels: release,automated
+          commit-message: "chore(release): prepare v${{ steps.version.outputs.version }} [automated]"
 
   publish-release:
     runs-on: ubuntu-latest
