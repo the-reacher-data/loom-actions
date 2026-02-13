@@ -1,7 +1,8 @@
 name: release
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: ["master"]
 
 permissions:
@@ -14,6 +15,7 @@ concurrency:
 
 jobs:
   detect:
+    if: ${{ github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
     outputs:
       branch: ${{ steps.pr.outputs.branch }}
@@ -21,30 +23,24 @@ jobs:
       is_release_branch: ${{ steps.pr.outputs.is_release_branch }}
       release_version: ${{ steps.pr.outputs.release_version }}
     steps:
-      - name: Detect merged PR metadata from merge commit SHA
+      - name: Detect merged PR metadata
         id: pr
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const sha = context.sha;
-            const { owner, repo } = context.repo;
-            const result = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner,
-              repo,
-              commit_sha: sha,
-            });
-            const mergedPr = result.data.find((pr) => pr.merged_at);
-            if (!mergedPr) {
-              core.setFailed(`No merged PR associated with commit ${sha}`);
-              return;
-            }
-            const branch = mergedPr.head.ref;
-            const isReleaseBranch = branch.startsWith("release/");
-            const releaseVersion = isReleaseBranch ? branch.replace(/^release\//, "") : "";
-            core.setOutput("pr_number", String(mergedPr.number));
-            core.setOutput("branch", branch);
-            core.setOutput("is_release_branch", isReleaseBranch ? "true" : "false");
-            core.setOutput("release_version", releaseVersion);
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          if [[ "$BRANCH" == release/* ]]; then
+            IS_RELEASE_BRANCH="true"
+            RELEASE_VERSION="${BRANCH#release/}"
+          else
+            IS_RELEASE_BRANCH="false"
+            RELEASE_VERSION=""
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "is_release_branch=$IS_RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
 
   prepare-release-pr:
     runs-on: ubuntu-latest
