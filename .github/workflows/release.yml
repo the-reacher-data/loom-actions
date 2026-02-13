@@ -3,17 +3,56 @@ name: release
 on:
   push:
     branches: ["main"]
+    paths-ignore:
+      - "CHANGELOG.md"
+      - "pyproject.toml"
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  detect:
     runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.pr.outputs.branch }}
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      is_release_branch: ${{ steps.pr.outputs.is_release_branch }}
+      release_version: ${{ steps.pr.outputs.release_version }}
+    steps:
+      - name: Detect merged PR metadata from merge commit SHA
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha;
+            const { owner, repo } = context.repo;
+            const result = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner,
+              repo,
+              commit_sha: sha,
+            });
+            const mergedPr = result.data.find((pr) => pr.merged_at);
+            if (!mergedPr) {
+              core.setFailed(`No merged PR associated with commit ${sha}`);
+              return;
+            }
+            const branch = mergedPr.head.ref;
+            const isReleaseBranch = branch.startsWith("release/");
+            const releaseVersion = isReleaseBranch ? branch.replace(/^release\//, "") : "";
+            core.setOutput("pr_number", String(mergedPr.number));
+            core.setOutput("branch", branch);
+            core.setOutput("is_release_branch", isReleaseBranch ? "true" : "false");
+            core.setOutput("release_version", releaseVersion);
+
+  prepare-release-pr:
+    runs-on: ubuntu-latest
+    needs: [detect]
+    if: ${{ needs.detect.outputs.is_release_branch != 'true' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,54 +64,102 @@ jobs:
 
       - uses: astral-sh/setup-uv@v3
 
-      - name: Detect merged branch from latest merge commit message
-        id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-          MSG=$(git log -1 --pretty=%B)
-          BRANCH=$(echo "$MSG" | sed -nE "s/.*from [^/]+\/(.*)$/\1/p" | head -n1)
-          if [ -z "$BRANCH" ]; then
-            BRANCH="main"
-          fi
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-
       - name: Compute version from branch semantic rules
         id: version
         uses: ./actions/release/versioning-branch-semantic
         with:
-          branch: ${{ steps.detect.outputs.branch }}
+          branch: ${{ needs.detect.outputs.branch }}
           prerelease: "false"
 
-      - name: Generate changelog
-        id: changelog
+      - name: Generate changelog and update CHANGELOG.md
+        if: ${{ steps.version.outputs.deploy == 'true' }}
         uses: ./actions/release/changelog-conventional-commit
         with:
           mode: "release"
-          branch: ${{ steps.detect.outputs.branch }}
+          branch: ${{ needs.detect.outputs.branch }}
           version: ${{ steps.version.outputs.version }}
+          pr-number: ${{ needs.detect.outputs.pr_number }}
           output: CHANGELOG_RELEASE.md
 
-      - name: Create and push tags
+      - name: Open or update release PR
         if: ${{ steps.version.outputs.deploy == 'true' }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: release/${{ steps.version.outputs.version }}
+          base: main
+          title: "chore(release): ${{ steps.version.outputs.version }} (#${{ needs.detect.outputs.pr_number }})"
+          body: |
+            Automated release PR for version **${{ steps.version.outputs.version }}**.
+            Source PR: #${{ needs.detect.outputs.pr_number }}
+          draft: false
+          delete-branch: true
+          add-paths: CHANGELOG.md,pyproject.toml
+          commit-message: "chore(release): ${{ steps.version.outputs.version }} (#${{ needs.detect.outputs.pr_number }})"
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs: [detect]
+    if: ${{ needs.detect.outputs.is_release_branch == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive release note section from CHANGELOG
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f CHANGELOG.md ]; then
+            echo "CHANGELOG.md not found"
+            exit 1
+          fi
+
+          awk '
+            NR == 1 { print; next }
+            /^# / { exit }
+            { print }
+          ' CHANGELOG.md > CHANGELOG_RELEASE.md
+
+          if [ ! -s CHANGELOG_RELEASE.md ]; then
+            echo "Release notes section is empty"
+            exit 1
+          fi
+
+      - name: Create and push tags
+        id: tag
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.detect.outputs.release_version }}
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ -z "${VERSION}" ]; then
+            echo "release version is empty"
+            exit 1
+          fi
+
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "tag_created=false" >> "$GITHUB_OUTPUT"
+            echo "Tag v${VERSION} already exists; skipping tag creation"
+            exit 0
+          fi
+
           git tag "v${VERSION}"
           git push origin "v${VERSION}"
+
           MAJOR=$(echo "${VERSION}" | cut -d. -f1)
           git push origin ":refs/tags/v${MAJOR}" || true
           git tag -fa "v${MAJOR}" -m "Release v${VERSION}"
           git push origin "v${MAJOR}" --force
 
+          echo "tag_created=true" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub release
-        if: ${{ steps.version.outputs.deploy == 'true' }}
+        if: ${{ steps.tag.outputs.tag_created == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
+          tag_name: v${{ needs.detect.outputs.release_version }}
+          name: v${{ needs.detect.outputs.release_version }}
           body_path: CHANGELOG_RELEASE.md

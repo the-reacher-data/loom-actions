@@ -21,7 +21,7 @@ jobs:
 
       - name: Run builder unit tests
         run: |
-          uv run --with pytest --with jinja2 pytest -q tests/unit/test_quality_builder.py
+          uv run --with pytest --with jinja2 pytest -q tests/unit
 
       - name: Smoke quality action (strict)
         uses: ./actions/python/quality-report

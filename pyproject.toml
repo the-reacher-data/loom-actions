@@ -11,3 +11,33 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
 ignore = ["E501"]
+
+[tool.semantic_branch]
+prerelease = [
+    "hotfix/.*",
+    "feature/.*",
+    "feat/.*",
+    "multifeature/.*",
+    "breaking/.*",
+    "fix/.*",
+]
+patch = [
+    "hotfix/.*",
+    "fix/.*",
+]
+minor = [
+    "feature/.*",
+    "feat/.*",
+    "multifeature/.*",
+]
+major = [
+    "breaking/.*",
+]
+prerelease_ignore = [
+    "docs/.*",
+]
+release_ignore = [
+    "wip/.*",
+    "docs/.*",
+    "chore/.*",
+]

@@ -142,6 +142,11 @@ def get_commit_squash() -> dict[str, Any]:
     if current:
         commits.append(current)
 
+    if not commits:
+        cleaned_subject = re.sub(r"\s*\(#\d+\)\s*$", "", subject).strip()
+        if cleaned_subject and not cleaned_subject.lower().startswith("wip:"):
+            commits.append({"subject": cleaned_subject, "body": ""})
+
     return {"sha": short, "sha_full": full, "subject": subject, "commits": commits}
 
 
@@ -254,6 +259,7 @@ def main() -> None:
             if not is_unreleased
             else f"Changelog preview for {args.branch} ({args.version})"
         )
+        pr_number = int(args.pr_number) if args.pr_number else None
         md = render(
             args.template,
             version,
@@ -261,7 +267,7 @@ def main() -> None:
             args.repo_url,
             squash=None,
             is_unreleased=is_unreleased,
-            pr_number=None,
+            pr_number=pr_number,
         )
     else:  # release mode
         squash = get_commit_squash()

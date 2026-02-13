@@ -32,7 +32,14 @@ jobs:
 
       - name: Run builder unit tests
         run: |
-          uv run --with pytest --with jinja2 pytest -q tests/unit/test_quality_builder.py
+          uv run --with pytest --with jinja2 pytest -q tests/unit
+
+      - name: Compute candidate version from branch semantic rules
+        id: version
+        uses: ./actions/release/versioning-branch-semantic
+        with:
+          branch: ${{ github.head_ref }}
+          prerelease: "false"
 
       - name: Fetch PR base branch ref for changelog diff
         shell: bash
@@ -48,7 +55,8 @@ jobs:
         with:
           mode: "pr"
           branch: ${{ github.event.pull_request.head.sha }}
-          version: "UNRELEASED"
+          version: ${{ steps.version.outputs.deploy == 'true' && steps.version.outputs.version || 'UNRELEASED' }}
+          pr-number: ${{ github.event.pull_request.number }}
           base-ref: origin/${{ github.base_ref }}
           output: changelog_preview.md
 

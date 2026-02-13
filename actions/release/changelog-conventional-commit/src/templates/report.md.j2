@@ -2,6 +2,8 @@
 # ✨ {{version}} ([#{{ pr_number }}]({{ repo_url }}/pull/{{ pr_number }})) ([`{{ squash.sha }}`]({{ repo_url }}/commit/{{ squash.sha_full }}))
 {% elif not is_unreleased and squash %}
 # 🚀 Release {{ version }} ([#{{ pr_number }}]({{ repo_url }}/pull/{{ pr_number }})) ([`{{ squash.sha }}`]({{ repo_url }}/commit/{{ squash.sha_full }}))
+{% elif is_unreleased and not squash and pr_number %}
+# ✨ {{version}} ([#{{ pr_number }}]({{ repo_url }}/pull/{{ pr_number }}))
 {% elif is_unreleased and not squash %}
 # ✨ {{version}}
 {% else %}
@@ -11,6 +13,7 @@
 {% macro render_items(items, squash) -%}
 {% for c in items -%}
 - {% if c.scope != "(no scope)" %}**{{ c.scope }}:** {% endif %}{{ c.title }}{% if not squash and c.sha %}([`{{ c.sha }}`]({{ repo_url }}/commit/{{ c.sha_full }})){% endif %}
+{% if not squash and pr_number %} ([files]({{ repo_url }}/pull/{{ pr_number }}/files)){% endif %}
 {% if c.body %}<br>
   {% for line in c.body.splitlines() %}
     {% if line.startswith('- ') %}
