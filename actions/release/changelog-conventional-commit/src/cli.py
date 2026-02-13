@@ -35,13 +35,44 @@ def _default_repo_url() -> str:
     return f"{server}/{repo}" if repo else server
 
 
+def _resolve_ref(ref: str, fallbacks: list[str] | None = None) -> str:
+    """Resolve a Git ref/sha to a valid local object name or raise."""
+    candidates = [ref] + (fallbacks or [])
+    for candidate in candidates:
+        if not candidate:
+            continue
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", candidate],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if result.returncode == 0:
+            return candidate
+    tried = ", ".join(candidates)
+    raise RuntimeError(f"Could not resolve any git ref. Tried: {tried}")
+
+
 def get_commits_pr(branch: str, base_ref: str) -> list[dict[str, str]]:
     """Retrieve commits for a PR branch compared to base_ref."""
+    head_ref = _resolve_ref(
+        branch,
+        [
+            f"origin/{branch}",
+            f"refs/remotes/origin/{branch}",
+            "HEAD",
+        ],
+    )
+    resolved_base_ref = _resolve_ref(
+        base_ref,
+        [f"origin/{base_ref}", f"refs/remotes/origin/{base_ref}"],
+    )
+
     base = subprocess.check_output(
-        ["git", "merge-base", branch, base_ref], text=True
+        ["git", "merge-base", head_ref, resolved_base_ref], text=True
     ).strip()
     raw = subprocess.check_output(
-        ["git", "log", f"{base}..HEAD", "--pretty=format:%h|%H|%s|%b---END---"],
+        ["git", "log", f"{base}..{head_ref}", "--pretty=format:%h|%H|%s|%b---END---"],
         text=True,
     )
 
