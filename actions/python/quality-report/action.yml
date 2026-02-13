@@ -1,0 +1,109 @@
+name: "Python Quality Report"
+description: "Run ruff, pyright, pytest/coverage and optional bandit to produce one report"
+
+inputs:
+  src-dir:
+    description: "Source directory"
+    required: false
+    default: "src"
+  test-dir:
+    description: "Test directory"
+    required: false
+    default: "tests"
+  coverage-threshold:
+    description: "Coverage threshold"
+    required: false
+    default: "80"
+  fail-on-quality:
+    description: "Fail condition for quality signals"
+    required: false
+    default: "any"
+  fail-on-security:
+    description: "Fail condition for security signals"
+    required: false
+    default: "high"
+  include-security:
+    description: "Whether to run bandit"
+    required: false
+    default: "true"
+
+outputs:
+  report-file:
+    description: "Generated markdown report"
+    value: ${{ steps.build.outputs.report_file }}
+  summary-file:
+    description: "Generated JSON summary"
+    value: ${{ steps.build.outputs.summary_file }}
+  blocking:
+    description: "Whether gates are blocking"
+    value: ${{ steps.build.outputs.blocking }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - uses: astral-sh/setup-uv@v3
+
+    - name: Run quality checks
+      id: checks
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        : > command_status.tsv
+
+        run_check() {
+          local name="$1"
+          local cmd="$2"
+          local artifacts="$3"
+
+          set +e
+          bash -lc "$cmd"
+          local rc=$?
+          set -e
+
+          local status="pass"
+          if [ "$rc" -ne 0 ]; then
+            status="fail"
+          fi
+
+          printf '%s\t%s\t%s\t%s\t%s\n' \
+            "$name" "$cmd" "$rc" "$status" "$artifacts" >> command_status.tsv
+          return 0
+        }
+
+        run_check "ruff" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' ruff check '${{ inputs.src-dir }}' --output-format json > ruff.json" "ruff.json"
+        run_check "pyright" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' pyright '${{ inputs.src-dir }}' --outputjson > pyright.json" "pyright.json"
+        run_check "pytest" "PYTHONPATH='${{ inputs.src-dir }}:'${PYTHONPATH:-} uv run --with-requirements '${{ github.action_path }}/requirements.txt' pytest '${{ inputs.test-dir }}' --cov='${{ inputs.src-dir }}' --cov-report=json:coverage.json --cov-report=xml:coverage.xml --junit-xml=junit.xml -o junit_family=legacy -v --tb=short" "junit.xml,coverage.json,coverage.xml"
+
+        if [ "${{ inputs.include-security }}" = "true" ]; then
+          run_check "bandit" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' bandit -r '${{ inputs.src-dir }}' -f json -o bandit.json" "bandit.json"
+        else
+          echo '{"results":[]}' > bandit.json
+          printf '%s\t%s\t%s\t%s\t%s\n' "bandit" "skipped" "0" "skipped" "bandit.json" >> command_status.tsv
+        fi
+
+    - name: Build markdown report
+      id: build
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        uv run --with-requirements "${{ github.action_path }}/requirements.txt" \
+          python "${{ github.action_path }}/src/builder.py" \
+            --ruff ruff.json \
+            --pyright pyright.json \
+            --junit junit.xml \
+            --coverage coverage.json \
+            --bandit bandit.json \
+            --commands command_status.tsv \
+            --template "${{ github.action_path }}/src/templates/report.md.j2" \
+            --output quality_report.md \
+            --summary quality_summary.json \
+            --outputs "$GITHUB_OUTPUT" \
+            --coverage-threshold "${{ inputs.coverage-threshold }}" \
+            --fail-on-quality "${{ inputs.fail-on-quality }}" \
+            --fail-on-security "${{ inputs.fail-on-security }}"

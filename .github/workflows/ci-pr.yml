@@ -1,0 +1,109 @@
+name: ci-pr
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Validate action metadata exists
+        run: |
+          test -f actions/core/pr-comment-update/action.yml
+          test -f actions/core/setup-uv/action.yml
+          test -f actions/release/versioning-branch-semantic/action.yml
+          test -f actions/release/changelog-conventional-commit/action.yml
+          test -f actions/python/quality-report/action.yml
+
+      - name: Run builder unit tests
+        run: |
+          uv run --with pytest --with jinja2 pytest -q tests/unit
+
+      - name: Compute candidate version from branch semantic rules
+        id: version
+        uses: ./actions/release/versioning-branch-semantic
+        with:
+          branch: ${{ github.head_ref }}
+          prerelease: "false"
+
+      - name: Fetch PR base branch ref for changelog diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --prune origin \
+            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+
+      - name: Generate changelog preview
+        id: changelog
+        continue-on-error: true
+        uses: ./actions/release/changelog-conventional-commit
+        with:
+          mode: "pr"
+          branch: ${{ github.event.pull_request.head.sha }}
+          version: ${{ steps.version.outputs.deploy == 'true' && steps.version.outputs.version || 'UNRELEASED' }}
+          pr-number: ${{ github.event.pull_request.number }}
+          base-ref: origin/${{ github.base_ref }}
+          output: changelog_preview.md
+
+      - name: Publish PR changelog comment
+        if: ${{ github.event_name == 'pull_request' && steps.changelog.outcome == 'success' && steps.changelog.outputs.output_path != '' }}
+        uses: ./actions/core/pr-comment-update
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          tags: "<!-- changelog-preview -->,<!-- branch-source:${{ github.head_ref }} -->"
+          body-file: ${{ steps.changelog.outputs.output_path }}
+
+      - name: Quality report (strict gate)
+        id: quality
+        continue-on-error: true
+        uses: ./actions/python/quality-report
+        with:
+          src-dir: examples/sample_project/src
+          test-dir: examples/sample_project/tests
+          coverage-threshold: "70"
+          fail-on-quality: "any"
+          fail-on-security: "high"
+          include-security: "true"
+
+      - name: Publish PR quality comment
+        if: ${{ github.event_name == 'pull_request' && always() }}
+        uses: ./actions/core/pr-comment-update
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          tags: "<!-- loom-quality-report -->"
+          body-file: ${{ steps.quality.outputs.report-file }}
+
+      - name: Enforce changelog generation
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.changelog.outcome }}" != "success" ]; then
+            echo "Changelog preview generation failed"
+            exit 1
+          fi
+
+      - name: Enforce quality gate
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.quality.outputs.blocking }}" = "true" ]; then
+            echo "Blocking quality/security conditions detected"
+            exit 1
+          fi

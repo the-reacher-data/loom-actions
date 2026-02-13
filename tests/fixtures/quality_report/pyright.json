@@ -1,0 +1,27 @@
+{
+  "version": "1.1.350",
+  "time": "0.1",
+  "generalDiagnostics": [
+    {
+      "file": "src/sample_pkg/module.py",
+      "severity": "error",
+      "message": "Argument of type \"str\" cannot be assigned to parameter of type \"int\"",
+      "range": {"start": {"line": 9, "character": 12}, "end": {"line": 9, "character": 16}},
+      "rule": "reportArgumentType"
+    },
+    {
+      "file": "src/sample_pkg/module.py",
+      "severity": "warning",
+      "message": "Type of \"x\" is unknown",
+      "range": {"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 1}},
+      "rule": "reportUnknownVariableType"
+    }
+  ],
+  "summary": {
+    "filesAnalyzed": 1,
+    "errorCount": 1,
+    "warningCount": 1,
+    "informationCount": 0,
+    "timeInSec": 0.1
+  }
+}

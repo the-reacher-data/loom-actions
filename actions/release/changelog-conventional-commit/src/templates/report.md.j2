@@ -1,0 +1,145 @@
+{% if is_unreleased and squash %}
+# ✨ {{version}} ([#{{ pr_number }}]({{ repo_url }}/pull/{{ pr_number }})) ([`{{ squash.sha }}`]({{ repo_url }}/commit/{{ squash.sha_full }}))
+{% elif not is_unreleased and squash %}
+# 🚀 Release {{ version }} ([#{{ pr_number }}]({{ repo_url }}/pull/{{ pr_number }})) ([`{{ squash.sha }}`]({{ repo_url }}/commit/{{ squash.sha_full }}))
+{% elif is_unreleased and not squash and pr_number %}
+# ✨ {{version}} ([#{{ pr_number }}]({{ repo_url }}/pull/{{ pr_number }}))
+{% elif is_unreleased and not squash %}
+# ✨ {{version}}
+{% else %}
+# 🚀 {{ version }}
+{% endif %}
+
+{% macro render_items(items, squash) -%}
+{% for c in items -%}
+- {% if c.scope != "(no scope)" %}**{{ c.scope }}:** {% endif %}{{ c.title }}{% if not squash and c.sha %}([`{{ c.sha }}`]({{ repo_url }}/commit/{{ c.sha_full }})){% endif %}
+{% if not squash and pr_number %} ([files]({{ repo_url }}/pull/{{ pr_number }}/files)){% endif %}
+{% if c.body %}<br>
+  {% for line in c.body.splitlines() %}
+    {% if line.startswith('- ') %}
+  - {{ line[2:] }}
+    {% else %}
+  > {{ line }}
+    {% endif %}
+  {% endfor %}
+{% endif %}
+
+{% endfor %}
+{%- endmacro %}
+
+{% if commits.get("feat") %}
+## ✨ Features
+{% if commits["feat"].get("(no scope)") %}
+{{ render_items(commits["feat"]["(no scope)"], squash) }}
+{% endif %}
+{% for scope, items in commits["feat"].items() %}
+{% if scope != "(no scope)" %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("fix") %}
+## 🐛 Fixes
+{% if commits["fix"].get("(no scope)") %}
+{{ render_items(commits["fix"]["(no scope)"], squash) }}
+{% endif %}
+{% for scope, items in commits["fix"].items() %}
+{% if scope != "(no scope)" %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("docs") %}
+## 📖 Documentation
+{% if commits["docs"].get("(no scope)") %}
+{{ render_items(commits["docs"]["(no scope)"], squash) }}
+{% endif %}
+{% for scope, items in commits["docs"].items() %}
+{% if scope != "(no scope)" %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("style") %}
+## 🎨 Style
+{% if commits["style"].get("(no scope)") %}
+{{ render_items(commits["style"]["(no scope)"], squash) }}
+{% endif %}
+{% for scope, items in commits["style"].items() %}
+{% if scope != "(no scope)" %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("refactor") %}
+## ♻️ Refactor
+{% if commits["refactor"].get("(no scope)") %}
+{{ render_items(commits["refactor"]["(no scope)"], squash) }}
+{% endif %}
+{% for scope, items in commits["refactor"].items() %}
+{% if scope != "(no scope)" %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("perf") %}
+## ⚡ Performance
+{% if commits["perf"].get("(no scope)") %}
+{{ render_items(commits["perf"]["(no scope)"], squash) }}
+{% endif %}
+{% for scope, items in commits["perf"].items() %}
+{% if scope != "(no scope)" %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("test") %}
+## ✅ Tests
+{% if commits["test"].get("(no scope)") %}
+{{ render_items(commits["test"]["(no scope)"], squash) }}
+{% endif %}
+{% for scope, items in commits["test"].items() %}
+{% if scope != "(no scope)" %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("chore") %}
+## 🛠 Chores
+{% if commits["chore"].get("(no scope)") %}
+{{ render_items(commits["chore"]["(no scope)"], squash) }}
+{% endif %}
+{% for scope, items in commits["chore"].items() %}
+{% if scope != "(no scope)" %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if commits.get("other") %}
+## 🔖 Other
+{% if commits["other"].get("(no scope)") %}
+{{ render_items(commits["other"]["(no scope)"], squash) }}
+{% endif %}
+{% for scope, items in commits["other"].items() %}
+{% if scope != "(no scope)" %}
+### {{ scope }}
+{{ render_items(items, squash) }}
+{% endif %}
+{% endfor %}
+{% endif %}

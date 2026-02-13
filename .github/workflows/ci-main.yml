@@ -1,0 +1,34 @@
+name: ci-main
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Run builder unit tests
+        run: |
+          uv run --with pytest --with jinja2 pytest -q tests/unit
+
+      - name: Smoke quality action (strict)
+        uses: ./actions/python/quality-report
+        with:
+          src-dir: examples/sample_project/src
+          test-dir: examples/sample_project/tests
+          coverage-threshold: "70"
+          fail-on-quality: "any"
+          fail-on-security: "high"
+          include-security: "true"

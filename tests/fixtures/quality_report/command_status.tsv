@@ -1,0 +1,4 @@
+ruff	ruff check src --output-format json	1	fail	ruff.json
+pyright	pyright src --outputjson	1	fail	pyright.json
+pytest	pytest tests --cov=src ...	1	fail	junit.xml,coverage.json,coverage.xml
+bandit	bandit -r src -f json -o bandit.json	0	pass	bandit.json

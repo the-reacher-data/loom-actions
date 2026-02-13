@@ -1,0 +1,71 @@
+name: "Changelog Conventional Commit"
+description: "Generate changelog from conventional commits"
+
+inputs:
+  mode:
+    description: "Mode: pr or release"
+    required: true
+  branch:
+    description: "Branch name"
+    required: true
+  version:
+    description: "Version label"
+    required: false
+  template:
+    description: "Custom Jinja2 template path"
+    required: false
+  pr-number:
+    description: "PR number"
+    required: false
+  output:
+    description: "Output markdown file"
+    required: false
+    default: "changelog_preview.md"
+  base-ref:
+    description: "Base ref for PR mode"
+    required: false
+    default: "origin/main"
+
+outputs:
+  output_path:
+    description: "Generated markdown path"
+    value: ${{ steps.gen.outputs.output_path }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - uses: astral-sh/setup-uv@v3
+
+    - name: Generate changelog
+      id: gen
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        args=(
+          --mode "${{ inputs.mode }}"
+          --branch "${{ inputs.branch }}"
+          --output "${{ inputs.output }}"
+          --base-ref "${{ inputs.base-ref }}"
+        )
+
+        if [ -n "${{ inputs.version }}" ]; then
+          args+=(--version "${{ inputs.version }}")
+        fi
+
+        if [ -n "${{ inputs.template }}" ]; then
+          args+=(--template "${{ inputs.template }}")
+        fi
+
+        if [ -n "${{ inputs.pr-number }}" ]; then
+          args+=(--pr-number "${{ inputs.pr-number }}")
+        fi
+
+        uv run --with-requirements "${{ github.action_path }}/requirements.txt" \
+          python "${{ github.action_path }}/src/cli.py" "${args[@]}"
+
+        echo "output_path=${{ inputs.output }}" >> "$GITHUB_OUTPUT"

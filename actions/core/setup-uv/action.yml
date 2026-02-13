@@ -1,0 +1,14 @@
+name: "Setup Python + uv"
+description: "Setup Python runtime and uv toolchain"
+inputs:
+  python-version:
+    required: false
+    default: "3.11"
+    description: "Python version"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - uses: astral-sh/setup-uv@v3

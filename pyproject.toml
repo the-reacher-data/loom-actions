@@ -1,0 +1,43 @@
+[project]
+name = "loom-actions"
+version = "0.1.0"
+description = "Reusable GitHub Actions for Python OSS workflows"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["E501"]
+
+[tool.semantic_branch]
+prerelease = [
+    "hotfix/.*",
+    "feature/.*",
+    "feat/.*",
+    "multifeature/.*",
+    "breaking/.*",
+    "fix/.*",
+]
+patch = [
+    "hotfix/.*",
+    "fix/.*",
+]
+minor = [
+    "feature/.*",
+    "feat/.*",
+    "multifeature/.*",
+]
+major = [
+    "breaking/.*",
+]
+prerelease_ignore = [
+    "docs/.*",
+]
+release_ignore = [
+    "wip/.*",
+    "docs/.*",
+    "chore/.*",
+]
