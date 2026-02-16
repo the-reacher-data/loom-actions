@@ -2,7 +2,6 @@
 
 [![CI PR](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-pr.yml/badge.svg)](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-pr.yml)
 [![CI Main](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-main.yml/badge.svg?branch=master)](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-main.yml)
-[![Release](https://github.com/the-reacher-data/loom-actions/actions/workflows/release.yml/badge.svg)](https://github.com/the-reacher-data/loom-actions/actions/workflows/release.yml)
 [![Pyright](https://img.shields.io/badge/Pyright-type%20checked-2b5b84?logo=microsoft&logoColor=white)](https://github.com/microsoft/pyright)
 [![Ruff](https://img.shields.io/badge/Ruff-lint-111111?logo=ruff&logoColor=white)](https://docs.astral.sh/ruff/)
 ![License](https://img.shields.io/github/license/the-reacher-data/loom-actions)
