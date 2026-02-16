@@ -1,25 +1,33 @@
 # Python Quality Report
 
-{% if blocking %}❌ Blocking issues found.{% else %}✅ Quality gates passed.{% endif %}
+{% if blocking %}## ❌ Blocking issues found{% else %}## ✅ Quality gates passed{% endif %}
 
-## Summary
+| Gate | Status |
+|---|---|
+| Quality gate | {{ "❌ fail" if quality_blocking else "✅ pass" }} |
+| Security gate | {{ "❌ fail" if security_blocking else "✅ pass" }} |
 
-| Metric | Value |
+## Executive Summary
+
+| Area | Value |
 |---|---:|
+| 🧪 Total tests | **{{ summary.tests_total }}** |
 | ✅ Passed tests | **{{ summary.tests_passed }}** |
 | ❌ Failed tests | **{{ summary.tests_failed }}** |
 | ⏭ Skipped tests | **{{ summary.tests_skipped }}** |
-| 🧪 Total tests | **{{ summary.tests_total }}** |
 | 📈 Coverage | **{{ summary.coverage }}%** |
 | 🧹 Ruff issues | **{{ summary.ruff_issues }}** |
 | 🧠 Pyright errors | **{{ summary.pyright_errors }}** |
 | 🧠 Pyright warnings | **{{ summary.pyright_warnings }}** |
 | 🔒 Bandit issues | **{{ summary.bandit_issues }}** |
 
-## Gates
+## Tool Status
 
-- Quality gate: {{ "❌ fail" if quality_blocking else "✅ pass" }}
-- Security gate: {{ "❌ fail" if security_blocking else "✅ pass" }}
+| Tool | Result | Exit code |
+|---|---|---:|
+{% for c in command_results -%}
+| `{{ c.name }}` | {{ "✅ pass" if c.status == "pass" else ("⏭ skipped" if c.status == "skipped" else "❌ fail") }} | `{{ c.exit_code }}` |
+{% endfor %}
 
 ---
 
@@ -64,9 +72,7 @@
 {% if ruff_findings|length == 0 %}
 ✅ No Ruff issues found.
 {% else %}
-| Metric | Value |
-|---|---:|
-| Findings | {{ ruff_findings|length }} |
+Findings: **{{ ruff_findings|length }}**
 
 <details>
 <summary>🔎 Top Ruff findings</summary>
