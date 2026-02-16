@@ -1,3 +1,19 @@
+# 🚀 Release 1.0.1 ([#8](https://github.com/the-reacher-data/loom-actions/pull/8)) ([`63d6d1a`](https://github.com/the-reacher-data/loom-actions/commit/63d6d1aeb44e9a5c1f01d81e51bad3c1b40ba5b3))
+
+
+
+## 🐛 Fixes
+- use bot token for release PR chaining
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.0.0 ([#6](https://github.com/the-reacher-data/loom-actions/pull/6)) ([`32cfe40`](https://github.com/the-reacher-data/loom-actions/commit/32cfe40037519e4ea44bbe6f9509d99ffbf311d7))
 
 
