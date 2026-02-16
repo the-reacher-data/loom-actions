@@ -79,6 +79,7 @@ jobs:
         id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
+          token: ${{ secrets.RELEASE_BOT_TOKEN != '' && secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           branch: release/${{ steps.version.outputs.version }}
           base: master
           title: "chore(release): prepare v${{ steps.version.outputs.version }} [automated]"
@@ -101,15 +102,14 @@ jobs:
       - name: Enable auto-merge for release PR
         if: ${{ steps.version.outputs.deploy == 'true' && steps.cpr.outputs.pull-request-number != '' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN != '' && secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           gh pr merge "${{ steps.cpr.outputs.pull-request-number }}" \
             --squash \
             --auto \
-            --repo "${{ github.repository }}" || \
-            echo "Unable to enable auto-merge for release PR; verify repository auto-merge settings."
+            --repo "${{ github.repository }}"
 
   publish-release:
     runs-on: ubuntu-latest
