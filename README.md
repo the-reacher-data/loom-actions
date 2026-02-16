@@ -129,3 +129,9 @@ make act-smoke
   - `the-reacher-data/loom-actions/actions/python/quality-report@v1`
   - `the-reacher-data/loom-actions/actions/release/versioning-branch-semantic@v1`
 - Keep major tags (`v1`, `v2`) stable and move them only on compatible releases.
+
+## Repository Settings
+
+- To allow automated release PRs to trigger downstream workflows (`ci-pr` and final `release` on `release/*` merge), add repository secret:
+  - `RELEASE_BOT_TOKEN`: PAT/GitHub App token with `contents:write` and `pull_requests:write`.
+- Keep `GITHUB_TOKEN` for standard workflow operations; `RELEASE_BOT_TOKEN` is used by the release automation steps that must emit new workflow events.
