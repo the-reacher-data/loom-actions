@@ -1,8 +1,8 @@
 # loom-actions
 
-![CI PR](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-pr.yml/badge.svg)
-![CI Main](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-main.yml/badge.svg)
-![Release](https://github.com/the-reacher-data/loom-actions/actions/workflows/release.yml/badge.svg)
+[![CI PR](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-pr.yml/badge.svg?branch=master)](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-pr.yml)
+[![CI Main](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-main.yml/badge.svg?branch=master)](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-main.yml)
+[![Release](https://github.com/the-reacher-data/loom-actions/actions/workflows/release.yml/badge.svg?branch=master)](https://github.com/the-reacher-data/loom-actions/actions/workflows/release.yml)
 ![Pyright](https://img.shields.io/badge/type%20checker-pyright-blue)
 ![Ruff](https://img.shields.io/badge/lint-ruff-%23D7FF64)
 ![License](https://img.shields.io/github/license/the-reacher-data/loom-actions)
@@ -11,7 +11,7 @@ Reusable GitHub Actions for Python projects using Trunk-Based Development and Co
 
 ## Features
 
-- Trunk-based release flow on `main`
+- Trunk-based release flow on `master`
 - Semantic versioning from merged branch name
 - Changelog generation from Conventional Commits + PR preview comment
 - Unified Python quality report in PRs (ruff + pyright + pytest/coverage + bandit)
@@ -114,14 +114,17 @@ make act-smoke
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | `ci-pr.yml` | `pull_request` | Validate actions, publish changelog+quality PR comments, enforce gates |
-| `ci-main.yml` | `push` on `main` | Mainline validation with stricter smoke checks |
-| `release.yml` | `push` on `main` | Compute version, generate changelog, tag, publish GitHub release |
+| `ci-main.yml` | `push` on `master` | Mainline validation with stricter smoke checks |
+| `release.yml` | `pull_request` `closed` on `master` | On merged PR: prepare release PR, auto-merge it, then publish tags/release when `release/*` is merged |
 | `act-unit-builder.yml` | local/PR | Unit tests intended for `act` |
 | `act-quality-smoke.yml` | local/PR | Composite action smoke run intended for `act` |
 
 ## Versioning and Consumption
 
-- Trunk-based flow: merge to `main`, then release workflow creates tags.
+- Trunk-based flow: merge to `master`, then release workflow creates tags.
+- Tag strategy (standard for reusable GitHub Actions):
+  - Immutable release tag: `vX.Y.Z` (for pinning exact versions)
+  - Moving major tag: `vX` (updated on each compatible minor/patch release)
 - Intended external consumption pattern:
   - `the-reacher-data/loom-actions/actions/python/quality-report@v1`
   - `the-reacher-data/loom-actions/actions/release/versioning-branch-semantic@v1`
