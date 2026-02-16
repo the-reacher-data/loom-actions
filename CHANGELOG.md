@@ -1,3 +1,21 @@
+# 🚀 Release 1.0.3 ([#12](https://github.com/the-reacher-data/loom-actions/pull/12)) ([`cfb2dc7`](https://github.com/the-reacher-data/loom-actions/commit/cfb2dc7c6c5c3a05a368449cd5890d07458eaa8d))
+
+
+
+
+
+
+
+
+
+## 🛠 Chores
+- normalize badges and auto-delete release branches
+- label release PRs with target version
+- simplify ruff and pyright section headers in report
+
+
+
+
 # 🚀 Release 1.0.2 ([#10](https://github.com/the-reacher-data/loom-actions/pull/10)) ([`ea98554`](https://github.com/the-reacher-data/loom-actions/commit/ea985547d823e60b7e68b4c8f53510fc20013925))
 
 
