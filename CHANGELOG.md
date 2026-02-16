@@ -1,3 +1,19 @@
+# 🚀 Release 1.0.4 ([#14](https://github.com/the-reacher-data/loom-actions/pull/14)) ([`17779af`](https://github.com/the-reacher-data/loom-actions/commit/17779af7110d8f5f69c7cb5fa235f71825b42a9b))
+
+
+
+
+
+
+
+
+
+## 🛠 Chores
+- remove release badge from readme
+
+
+
+
 # 🚀 Release 1.0.3 ([#12](https://github.com/the-reacher-data/loom-actions/pull/12)) ([`cfb2dc7`](https://github.com/the-reacher-data/loom-actions/commit/cfb2dc7c6c5c3a05a368449cd5890d07458eaa8d))
 
 
