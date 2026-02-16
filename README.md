@@ -3,8 +3,8 @@
 [![CI PR](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-pr.yml/badge.svg)](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-pr.yml)
 [![CI Main](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-main.yml/badge.svg?branch=master)](https://github.com/the-reacher-data/loom-actions/actions/workflows/ci-main.yml)
 [![Release](https://github.com/the-reacher-data/loom-actions/actions/workflows/release.yml/badge.svg)](https://github.com/the-reacher-data/loom-actions/actions/workflows/release.yml)
-[<img src="https://cdn.simpleicons.org/python/3776AB" alt="Pyright" height="20">](https://github.com/microsoft/pyright)
-[<img src="https://cdn.simpleicons.org/ruff/000000" alt="Ruff" height="20">](https://docs.astral.sh/ruff/)
+[![Pyright](https://img.shields.io/badge/Pyright-type%20checked-2b5b84?logo=microsoft&logoColor=white)](https://github.com/microsoft/pyright)
+[![Ruff](https://img.shields.io/badge/Ruff-lint-111111?logo=ruff&logoColor=white)](https://docs.astral.sh/ruff/)
 ![License](https://img.shields.io/github/license/the-reacher-data/loom-actions)
 
 Reusable GitHub Actions for Python projects using Trunk-Based Development and Conventional Commits.
