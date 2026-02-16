@@ -96,7 +96,7 @@ jobs:
           draft: false
           delete-branch: true
           add-paths: CHANGELOG.md,pyproject.toml
-          labels: release,automated
+          labels: release,automated,version:${{ steps.version.outputs.version }}
           commit-message: "chore(release): prepare v${{ steps.version.outputs.version }} [automated]"
 
       - name: Enable auto-merge for release PR
