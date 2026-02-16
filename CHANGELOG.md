@@ -1,3 +1,22 @@
+# 🚀 Release 1.0.2 ([#10](https://github.com/the-reacher-data/loom-actions/pull/10)) ([`ea98554`](https://github.com/the-reacher-data/loom-actions/commit/ea985547d823e60b7e68b4c8f53510fc20013925))
+
+
+## ✨ Features
+- improve PR quality report UX layout
+
+
+
+
+
+
+
+
+## 🛠 Chores
+- refine workflow badges and no-background tooling icons
+
+
+
+
 # 🚀 Release 1.0.1 ([#8](https://github.com/the-reacher-data/loom-actions/pull/8)) ([`63d6d1a`](https://github.com/the-reacher-data/loom-actions/commit/63d6d1aeb44e9a5c1f01d81e51bad3c1b40ba5b3))
 
 
