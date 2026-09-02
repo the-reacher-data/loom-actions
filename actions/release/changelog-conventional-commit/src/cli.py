@@ -103,6 +103,28 @@ def get_commits_pr(branch: str, base_ref: str) -> list[dict[str, str]]:
     return commits
 
 
+# Types the changelog template renders.  A body line that parses as a
+# conventional commit but names some other type -- "Verification: 4866 passed"
+# in a release commit body, say -- produces a group nothing renders, so the
+# changelog comes out empty.  Reading the squash subject as well is what keeps
+# that from silently swallowing the release.
+_RENDERED_TYPES = frozenset(
+    {"chore", "docs", "feat", "fix", "other", "perf", "refactor", "style", "test"}
+)
+
+_CONVENTIONAL = re.compile(r"^(?P<type>\w+)(\([^)]*\))?:\s*.+$")
+
+
+def _has_rendered_type(commits: list[dict[str, str]]) -> bool:
+    """Whether any collected commit lands in a group the template renders."""
+    for commit in commits:
+        match = _CONVENTIONAL.match(commit["subject"])
+        commit_type = match.group("type").lower() if match else "other"
+        if commit_type in _RENDERED_TYPES:
+            return True
+    return False
+
+
 def get_commit_squash() -> dict[str, Any]:
     """
     Retrieve the squash commit (subject + body).
@@ -142,7 +164,7 @@ def get_commit_squash() -> dict[str, Any]:
     if current:
         commits.append(current)
 
-    if not commits:
+    if not _has_rendered_type(commits):
         cleaned_subject = re.sub(r"\s*\(#\d+\)\s*$", "", subject).strip()
         if cleaned_subject and not cleaned_subject.lower().startswith("wip:"):
             commits.append({"subject": cleaned_subject, "body": ""})

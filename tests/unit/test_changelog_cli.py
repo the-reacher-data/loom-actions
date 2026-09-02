@@ -99,3 +99,38 @@ def test_render_hides_no_scope_heading_and_shows_unscoped_first() -> None:
 
     assert "### (no scope)" not in markdown
     assert markdown.index("unscoped change") < markdown.index("### api")
+
+
+def test_get_commit_squash_keeps_the_subject_when_the_body_names_an_unrendered_type(
+    monkeypatch,
+) -> None:
+    """A prose line shaped like a conventional commit must not swallow the release.
+
+    Reproduces the commit that produced an empty 1.7.0 changelog: the squash
+    subject is a real ``feat``, but the body carries ``Verification: 4866
+    passed...``, which parses as a conventional commit of type ``Verification``
+    -- a group the template does not render.  The old fallback only fired on an
+    empty list, so the subject was dropped and the changelog came out blank.
+    """
+    cli = _load_changelog_cli_module()
+    subject = "feat(ai): pluggable MCP server authentication (#139)"
+    body = (
+        "Loom could only reach MCP servers with no authentication at all.\n"
+        "\n"
+        "Verification: 4866 passed, 18 skipped; mypy clean on 541 files.\n"
+    )
+    monkeypatch.setattr(
+        cli.subprocess,
+        "check_output",
+        lambda *_args, **_kwargs: f"abc1234|{'a' * 40}|{subject}|{body}",
+    )
+
+    squash = cli.get_commit_squash()
+    grouped = cli.group_commits(squash["commits"])
+
+    assert "feat" in grouped, (
+        "the squash subject is the only reliable source for a squash merge; "
+        f"grouped types were {sorted(grouped)}"
+    )
+    titles = [item["title"] for scope in grouped["feat"].values() for item in scope]
+    assert "pluggable MCP server authentication" in titles
