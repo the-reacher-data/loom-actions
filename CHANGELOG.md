@@ -1,3 +1,30 @@
+# 🚀 Release 1.0.5 ([#17](https://github.com/the-reacher-data/loom-actions/pull/17)) ([`b355b14`](https://github.com/the-reacher-data/loom-actions/commit/b355b14ed42098bc3d09d1aba1a71727a643358a))
+
+
+## ✨ Features
+### ai
+- **ai:** pluggable MCP server authentication (#139)<br>
+  > So a well-formed feat produced a changelog with a header and nothing under it.
+  > The fallback now fires when no collected entry lands in a type the template
+  > renders, not merely when the list is empty. A squash subject is always the PR
+  > title; a squash body is free text anyone can write, and a single "Word: " line
+  > was enough to swallow the release.
+  > Verified by reverting the one-line condition: the new test fails against the
+  > old behaviour and passes against the new one.
+  > Claude-Session: https://claude.ai/code/session_01TLAapySqoC4wWTLxydLka3
+  > Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.0.4 ([#14](https://github.com/the-reacher-data/loom-actions/pull/14)) ([`17779af`](https://github.com/the-reacher-data/loom-actions/commit/17779af7110d8f5f69c7cb5fa235f71825b42a9b))
 
 
