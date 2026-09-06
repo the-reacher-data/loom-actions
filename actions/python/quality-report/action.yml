@@ -26,6 +26,14 @@ inputs:
     description: "Whether to run bandit"
     required: false
     default: "true"
+  test-results-dir:
+    description: >
+      Directory holding test results produced elsewhere: junit.xml, coverage.json and
+      coverage.xml. When set, the action reports those results instead of running pytest
+      itself, and fails when any of the three files is missing. Empty by default, in which
+      case pytest runs here exactly as before.
+    required: false
+    default: ""
 
 outputs:
   report-file:
@@ -55,6 +63,14 @@ runs:
 
         : > command_status.tsv
 
+        # An existing lockfile is the resolution the caller committed, so it is
+        # honoured instead of being re-resolved. A project without one is
+        # resolved as before: --frozen would fail for want of a lockfile.
+        FROZEN=""
+        if [ -f uv.lock ]; then
+          FROZEN="--frozen"
+        fi
+
         run_check() {
           local name="$1"
           local cmd="$2"
@@ -75,12 +91,31 @@ runs:
           return 0
         }
 
-        run_check "ruff" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' ruff check '${{ inputs.src-dir }}' --output-format json > ruff.json" "ruff.json"
-        run_check "pyright" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' pyright '${{ inputs.src-dir }}' --outputjson > pyright.json" "pyright.json"
-        run_check "pytest" "PYTHONPATH='${{ inputs.src-dir }}:'${PYTHONPATH:-} uv run --with-requirements '${{ github.action_path }}/requirements.txt' pytest '${{ inputs.test-dir }}' --cov='${{ inputs.src-dir }}' --cov-report=json:coverage.json --cov-report=xml:coverage.xml --junit-xml=junit.xml -o junit_family=legacy -v --tb=short" "junit.xml,coverage.json,coverage.xml"
+        run_check "ruff" "uv run $FROZEN --with-requirements '${{ github.action_path }}/requirements.txt' ruff check '${{ inputs.src-dir }}' --output-format json > ruff.json" "ruff.json"
+        run_check "pyright" "uv run $FROZEN --with-requirements '${{ github.action_path }}/requirements.txt' pyright '${{ inputs.src-dir }}' --outputjson > pyright.json" "pyright.json"
+
+        # Test results the caller already produced are reported as they are. The
+        # report still blocks on a failed test or on coverage under the
+        # threshold, because both are read from these files rather than from the
+        # exit code of a pytest this action ran.
+        REUSE_DIR='${{ inputs.test-results-dir }}'
+        if [ -n "$REUSE_DIR" ]; then
+          for artifact in junit.xml coverage.json coverage.xml; do
+            if [ ! -f "$REUSE_DIR/$artifact" ]; then
+              echo "test-results-dir '$REUSE_DIR' does not contain $artifact"
+              exit 1
+            fi
+            cp "$REUSE_DIR/$artifact" "./$artifact"
+          done
+          printf '%s\t%s\t%s\t%s\t%s\n' \
+            "pytest" "test results supplied by the caller" "0" "reused" \
+            "junit.xml,coverage.json,coverage.xml" >> command_status.tsv
+        else
+          run_check "pytest" "PYTHONPATH='${{ inputs.src-dir }}:'${PYTHONPATH:-} uv run $FROZEN --with-requirements '${{ github.action_path }}/requirements.txt' pytest '${{ inputs.test-dir }}' --cov='${{ inputs.src-dir }}' --cov-report=json:coverage.json --cov-report=xml:coverage.xml --junit-xml=junit.xml -o junit_family=legacy -v --tb=short" "junit.xml,coverage.json,coverage.xml"
+        fi
 
         if [ "${{ inputs.include-security }}" = "true" ]; then
-          run_check "bandit" "uv run --with-requirements '${{ github.action_path }}/requirements.txt' bandit -r '${{ inputs.src-dir }}' -f json -o bandit.json" "bandit.json"
+          run_check "bandit" "uv run $FROZEN --with-requirements '${{ github.action_path }}/requirements.txt' bandit -r '${{ inputs.src-dir }}' -f json -o bandit.json" "bandit.json"
         else
           echo '{"results":[]}' > bandit.json
           printf '%s\t%s\t%s\t%s\t%s\n' "bandit" "skipped" "0" "skipped" "bandit.json" >> command_status.tsv
@@ -92,7 +127,11 @@ runs:
       run: |
         set -euo pipefail
 
-        uv run --with-requirements "${{ github.action_path }}/requirements.txt" \
+        FROZEN=""
+        if [ -f uv.lock ]; then
+          FROZEN="--frozen"
+        fi
+        uv run $FROZEN --with-requirements "${{ github.action_path }}/requirements.txt" \
           python "${{ github.action_path }}/src/builder.py" \
             --ruff ruff.json \
             --pyright pyright.json \
