@@ -62,10 +62,15 @@ both are read from these files rather than from the exit code of a pytest this a
 
 ### Lockfiles
 
-When the repository contains a `uv.lock`, the tools now run with `--frozen`, so the committed
-resolution is what gets used. **A repository whose lockfile is stale now fails instead of
-silently re-resolving** — that is the point of it. A repository with no `uv.lock` is resolved
-exactly as before.
+When the repository contains a `uv.lock`, the tools run with `--frozen`, so the committed
+resolution is what gets used.
+
+> **Breaking for one case, shipped in v1.1.0.** A repository whose lockfile is **stale** used
+> to be re-resolved silently and now **fails**. That is the intended behaviour — a run whose
+> dependencies differ from the ones you committed is not reproducing anything — but it is a
+> behavioural break, so a consumer upgrading to v1.1.0 should run `uv lock` and commit the
+> result before pinning. A repository with no `uv.lock` at all is unaffected: `--frozen` is
+> only added when the file exists.
 
 ## Quick Start
 

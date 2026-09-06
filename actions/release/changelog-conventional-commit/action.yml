@@ -43,29 +43,37 @@ runs:
     - name: Generate changelog
       id: gen
       shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        BRANCH: ${{ inputs.branch }}
+        OUTPUT: ${{ inputs.output }}
+        BASE_REF: ${{ inputs.base-ref }}
+        VERSION: ${{ inputs.version }}
+        TEMPLATE: ${{ inputs.template }}
+        PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
 
         args=(
-          --mode "${{ inputs.mode }}"
-          --branch "${{ inputs.branch }}"
-          --output "${{ inputs.output }}"
-          --base-ref "${{ inputs.base-ref }}"
+          --mode "${MODE}"
+          --branch "${BRANCH}"
+          --output "${OUTPUT}"
+          --base-ref "${BASE_REF}"
         )
 
-        if [ -n "${{ inputs.version }}" ]; then
-          args+=(--version "${{ inputs.version }}")
+        if [ -n "${VERSION:-}" ]; then
+          args+=(--version "${VERSION}")
         fi
 
-        if [ -n "${{ inputs.template }}" ]; then
-          args+=(--template "${{ inputs.template }}")
+        if [ -n "${TEMPLATE:-}" ]; then
+          args+=(--template "${TEMPLATE}")
         fi
 
-        if [ -n "${{ inputs.pr-number }}" ]; then
-          args+=(--pr-number "${{ inputs.pr-number }}")
+        if [ -n "${PR_NUMBER:-}" ]; then
+          args+=(--pr-number "${PR_NUMBER}")
         fi
 
         uv run --with-requirements "${{ github.action_path }}/requirements.txt" \
           python "${{ github.action_path }}/src/cli.py" "${args[@]}"
 
-        echo "output_path=${{ inputs.output }}" >> "$GITHUB_OUTPUT"
+        echo "output_path=${OUTPUT}" >> "$GITHUB_OUTPUT"
