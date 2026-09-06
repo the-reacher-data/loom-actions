@@ -58,6 +58,8 @@ runs:
     - name: Run quality checks
       id: checks
       shell: bash
+      env:
+        TEST_RESULTS_DIR: ${{ inputs.test-results-dir }}
       run: |
         set -euo pipefail
 
@@ -98,14 +100,13 @@ runs:
         # report still blocks on a failed test or on coverage under the
         # threshold, because both are read from these files rather than from the
         # exit code of a pytest this action ran.
-        REUSE_DIR='${{ inputs.test-results-dir }}'
-        if [ -n "$REUSE_DIR" ]; then
+        if [ -n "${TEST_RESULTS_DIR:-}" ]; then
           for artifact in junit.xml coverage.json coverage.xml; do
-            if [ ! -f "$REUSE_DIR/$artifact" ]; then
-              echo "test-results-dir '$REUSE_DIR' does not contain $artifact"
+            if [ ! -f "${TEST_RESULTS_DIR}/$artifact" ]; then
+              echo "test-results-dir '${TEST_RESULTS_DIR}' does not contain $artifact"
               exit 1
             fi
-            cp "$REUSE_DIR/$artifact" "./$artifact"
+            cp "${TEST_RESULTS_DIR}/$artifact" "./$artifact"
           done
           printf '%s\t%s\t%s\t%s\t%s\n' \
             "pytest" "test results supplied by the caller" "0" "reused" \

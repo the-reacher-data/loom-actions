@@ -34,13 +34,17 @@ runs:
     - name: Calculate version
       id: calc
       shell: bash
+      env:
+        BRANCH: ${{ inputs.branch }}
+        PRERELEASE: ${{ inputs.prerelease }}
+        CONFIG_FILE: ${{ inputs.config-file }}
       run: |
         set -euo pipefail
         result=$(uv run --with-requirements "${{ github.action_path }}/requirements.txt" \
           python "${{ github.action_path }}/src/cli.py" \
-          --branch "${{ inputs.branch }}" \
-          --prerelease "${{ inputs.prerelease }}" \
-          --config "${{ inputs.config-file }}")
+          --branch "${BRANCH}" \
+          --prerelease "${PRERELEASE}" \
+          --config "${CONFIG_FILE}")
 
         version=$(echo "$result" | awk -F= '/^version=/{print $2}')
         deploy=$(echo "$result" | awk -F= '/^deploy=/{print $2}')
