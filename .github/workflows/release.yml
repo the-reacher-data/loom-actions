@@ -23,24 +23,29 @@ jobs:
       is_release_branch: ${{ steps.pr.outputs.is_release_branch }}
       release_version: ${{ steps.pr.outputs.release_version }}
     steps:
+      # A branch name is chosen by whoever opened the pull request, so it reaches
+      # the script through the environment. Interpolated into the script text it
+      # would be substituted before bash parses it, and this job holds a token
+      # that can push and merge.
       - name: Detect merged PR metadata
         id: pr
         shell: bash
+        env:
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          BRANCH="${{ github.event.pull_request.head.ref }}"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          if [[ "$BRANCH" == release/* ]]; then
+          if [[ "${PR_HEAD_REF}" == release/* ]]; then
             IS_RELEASE_BRANCH="true"
-            RELEASE_VERSION="${BRANCH#release/}"
+            RELEASE_VERSION="${PR_HEAD_REF#release/}"
           else
             IS_RELEASE_BRANCH="false"
             RELEASE_VERSION=""
           fi
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "is_release_branch=$IS_RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
-          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "branch=${PR_HEAD_REF}" >> "$GITHUB_OUTPUT"
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "is_release_branch=${IS_RELEASE_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "release_version=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
 
   prepare-release-pr:
     runs-on: ubuntu-latest
