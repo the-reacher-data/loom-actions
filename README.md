@@ -47,6 +47,25 @@ Tunable inputs:
 | `fail-on-quality` | `none`, `any` | `any` |
 | `fail-on-security` | `none`, `low`, `medium`, `high` | `high` |
 | `include-security` | `true`, `false` | `true` |
+| `test-results-dir` | path, or empty | empty |
+
+### Reporting test results produced elsewhere
+
+`test-results-dir` points at a directory already holding `junit.xml`, `coverage.json` and
+`coverage.xml`. When it is set, the action reports those files instead of running pytest, and
+fails if any of the three is missing. It exists for a pipeline that runs its tests in its own
+job — split across several jobs, or under a resolution the caller controls — and wants one
+report over the results rather than a second execution of the same suite.
+
+The gate is unchanged: a failed test and coverage below the threshold still block, because
+both are read from these files rather than from the exit code of a pytest this action ran.
+
+### Lockfiles
+
+When the repository contains a `uv.lock`, the tools now run with `--frozen`, so the committed
+resolution is what gets used. **A repository whose lockfile is stale now fails instead of
+silently re-resolving** — that is the point of it. A repository with no `uv.lock` is resolved
+exactly as before.
 
 ## Quick Start
 
