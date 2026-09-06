@@ -1,3 +1,20 @@
+# 🚀 Release 1.1.0 ([#19](https://github.com/the-reacher-data/loom-actions/pull/19)) ([`90dbb02`](https://github.com/the-reacher-data/loom-actions/commit/90dbb0292cbf5ffe46975fe826ae8ac1732bb80e))
+
+
+## ✨ Features
+### quality-report
+- **quality-report:** report test results produced elsewhere
+
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.0.6 ([#20](https://github.com/the-reacher-data/loom-actions/pull/20)) ([`4af5799`](https://github.com/the-reacher-data/loom-actions/commit/4af57995f0565c02fb52dc355c6a02f94433f51c))
 
 
