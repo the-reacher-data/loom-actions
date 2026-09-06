@@ -1,3 +1,20 @@
+# 🚀 Release 1.1.1 ([#23](https://github.com/the-reacher-data/loom-actions/pull/23)) ([`a0c0d6d`](https://github.com/the-reacher-data/loom-actions/commit/a0c0d6de35ff2a1acc62d4f857d5d63d1c08f4ef))
+
+
+
+## 🐛 Fixes
+### actions
+- **actions:** pass every caller-supplied input through the environment
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.1.0 ([#19](https://github.com/the-reacher-data/loom-actions/pull/19)) ([`90dbb02`](https://github.com/the-reacher-data/loom-actions/commit/90dbb0292cbf5ffe46975fe826ae8ac1732bb80e))
 
 
