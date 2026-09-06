@@ -1,3 +1,20 @@
+# 🚀 Release 1.0.6 ([#20](https://github.com/the-reacher-data/loom-actions/pull/20)) ([`4af5799`](https://github.com/the-reacher-data/loom-actions/commit/4af57995f0565c02fb52dc355c6a02f94433f51c))
+
+
+
+## 🐛 Fixes
+### release
+- **release:** pass the merged branch name through the environment
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.0.5 ([#17](https://github.com/the-reacher-data/loom-actions/pull/17)) ([`b355b14`](https://github.com/the-reacher-data/loom-actions/commit/b355b14ed42098bc3d09d1aba1a71727a643358a))
 
 
