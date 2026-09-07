@@ -1,0 +1,22 @@
+{
+  "event_name": "pull_request",
+  "action": "closed",
+  "pull_request": {
+    "number": 124,
+    "merged": true,
+    "head": {
+      "ref": "release/0.1.1"
+    },
+    "base": {
+      "ref": "master"
+    }
+  },
+  "repository": {
+    "full_name": "the-reacher-data/loom-actions",
+    "name": "loom-actions",
+    "owner": {
+      "login": "the-reacher-data"
+    },
+    "default_branch": "master"
+  }
+}

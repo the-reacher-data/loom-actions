@@ -106,7 +106,11 @@ runs:
               echo "test-results-dir '${TEST_RESULTS_DIR}' does not contain $artifact"
               exit 1
             fi
-            cp "${TEST_RESULTS_DIR}/$artifact" "./$artifact"
+            # A caller whose results are already in the workspace passes ".",
+            # and cp refuses a file as its own destination.
+            if [ ! "${TEST_RESULTS_DIR}/$artifact" -ef "./$artifact" ]; then
+              cp "${TEST_RESULTS_DIR}/$artifact" "./$artifact"
+            fi
           done
           printf '%s\t%s\t%s\t%s\t%s\n' \
             "pytest" "test results supplied by the caller" "0" "reused" \
