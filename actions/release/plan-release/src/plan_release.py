@@ -115,8 +115,17 @@ def next_version(last_tag: str | None, part: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
+def _tagged_commit(repository: Path, tag: str) -> str:
+    return _run(("git", "-C", str(repository), "rev-list", "-n", "1", tag)).strip()
+
+
 def latest_release_tag(repository: Path, merge_sha: str) -> str | None:
-    """Return the highest release tag reachable from *merge_sha*."""
+    """Return the highest release tag before *merge_sha*, ignoring its own tags.
+
+    A release re-run for a commit that is already tagged must plan the same
+    version again, so a tag pointing at *merge_sha* is not a release that
+    preceded it.
+    """
     output = _run(
         (
             "git",
@@ -132,8 +141,11 @@ def latest_release_tag(repository: Path, merge_sha: str) -> str | None:
     )
     for line in output.splitlines():
         candidate = line.strip()
-        if _RELEASE_TAG.match(candidate):
-            return candidate
+        if not _RELEASE_TAG.match(candidate):
+            continue
+        if _tagged_commit(repository, candidate) == merge_sha:
+            continue
+        return candidate
     return None
 
 
