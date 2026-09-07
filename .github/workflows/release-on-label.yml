@@ -1,9 +1,12 @@
 name: release-on-label
 
-# Merging a pull request that carries the release label publishes everything
-# merged since the last tag. Publishing to PyPI is opt-in: a repository that
-# ships an application, not a package, gets the tag, the notes and the GitHub
-# release, and never builds a distribution.
+# Merging a pull request that carries the release label releases everything
+# merged since the last tag: the plan, the tag, the notes and the GitHub
+# release. Building a distribution is opt-in.
+#
+# Uploading it is NOT done here. PyPI's trusted publishing does not support
+# reusable workflows — the OIDC claim names this file, not the caller's — so the
+# caller publishes the artifact this workflow leaves behind. See PUBLISHING.md.
 on:
   workflow_call:
     inputs:
@@ -17,13 +20,13 @@ on:
         required: false
         type: string
         default: "master"
-      publish-to-pypi:
-        description: "Build a distribution and publish it to PyPI"
+      build-distribution:
+        description: "Build a distribution for the caller to publish"
         required: false
         type: boolean
         default: false
       package-name:
-        description: "Distribution name, required when publishing, to check the built version"
+        description: "Distribution name, required when building, to check the built version"
         required: false
         type: string
         default: ""
@@ -77,12 +80,12 @@ jobs:
             exit 1
           fi
 
-      - name: Require a package name when publishing
-        if: ${{ inputs.publish-to-pypi && inputs.package-name == '' }}
+      - name: Require a package name when building
+        if: ${{ inputs.build-distribution && inputs.package-name == '' }}
         shell: bash
         run: |
           set -euo pipefail
-          echo "publish-to-pypi needs package-name to check the built version against the tag."
+          echo "build-distribution needs package-name to check the built version against the tag."
           exit 1
 
       - name: Plan the release
@@ -132,7 +135,7 @@ jobs:
 
   build:
     needs: plan
-    if: ${{ inputs.publish-to-pypi }}
+    if: ${{ inputs.build-distribution }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -196,7 +199,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
@@ -205,13 +207,6 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-notes
-
-      - name: Download distributions
-        if: ${{ inputs.publish-to-pypi }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: distributions
-          path: dist
 
       - name: Update floating major tag
         env:
@@ -243,9 +238,3 @@ jobs:
           tag_name: v${{ needs.plan.outputs.version }}
           name: v${{ needs.plan.outputs.version }}
           body_path: CHANGELOG_RELEASE.md
-
-      # Trusted publishing: the index mints a token for this repository and this
-      # workflow, for this run. There is no credential to leak or rotate.
-      - name: Publish package to PyPI
-        if: ${{ inputs.publish-to-pypi }}
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1 2026-07-28 (handles Metadata-Version 2.5)
