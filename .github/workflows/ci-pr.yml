@@ -32,7 +32,7 @@ jobs:
 
       - name: Run builder unit tests
         run: |
-          uv run --with pytest --with jinja2 pytest -q tests/unit
+          uv run --with pytest --with jinja2 --with pyyaml pytest -q tests/unit
 
       - name: Compute candidate version from branch semantic rules
         id: version
