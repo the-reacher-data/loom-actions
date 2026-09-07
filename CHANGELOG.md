@@ -1,3 +1,34 @@
+# 🚀 Release 1.2.0 ([#27](https://github.com/the-reacher-data/loom-actions/pull/27)) ([`70d2b11`](https://github.com/the-reacher-data/loom-actions/commit/70d2b11807373845aaed4d619872985922939927))
+
+
+## ✨ Features
+### release
+- **release:** a reusable release for every trunk-based repository<br>
+  > Merging a pull request that carries the release label publishes everything
+  > merged since the last tag. The version is derived from the branches the range
+  > ships, taking the highest part any of them asks for, so a batch holding a
+  > feature never goes out as a patch.
+  > Publishing to PyPI is opt-in and off by default. A repository that ships an
+  > application, not a package, gets the tag, the notes and the GitHub release and
+  > never builds a distribution — so it needs no index account, no trusted
+  > publisher and no secret. Asking to publish without a package name fails
+  > closed, because the built version could not then be checked against the tag.
+  > The planner moves here from loom-py: a workflow reusable by other repositories
+  > cannot read a script that lives in one of them.
+  > Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+  > Claude-Session: https://claude.ai/code/session_016xY1skW5S2PU9Fc3M7tfAW
+
+
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.1.2 ([#25](https://github.com/the-reacher-data/loom-actions/pull/25)) ([`6260f7c`](https://github.com/the-reacher-data/loom-actions/commit/6260f7cf2774d652fc08246a6748c6e1dab646f5))
 
 
