@@ -1,3 +1,20 @@
+# 🚀 Release 1.1.2 ([#25](https://github.com/the-reacher-data/loom-actions/pull/25)) ([`6260f7c`](https://github.com/the-reacher-data/loom-actions/commit/6260f7cf2774d652fc08246a6748c6e1dab646f5))
+
+
+
+## 🐛 Fixes
+### quality-report
+- **quality-report:** adopt results that already sit in the workspace
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.1.1 ([#23](https://github.com/the-reacher-data/loom-actions/pull/23)) ([`a0c0d6d`](https://github.com/the-reacher-data/loom-actions/commit/a0c0d6de35ff2a1acc62d4f857d5d63d1c08f4ef))
 
 
