@@ -1,3 +1,20 @@
+# 🚀 Release 1.2.1 ([#29](https://github.com/the-reacher-data/loom-actions/pull/29)) ([`eb68725`](https://github.com/the-reacher-data/loom-actions/commit/eb6872566d79eb09bae5b68ffa73362c407b0eea))
+
+
+
+## 🐛 Fixes
+### release
+- **release:** leave the upload to the caller, which PyPI can recognise
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.2.0 ([#27](https://github.com/the-reacher-data/loom-actions/pull/27)) ([`70d2b11`](https://github.com/the-reacher-data/loom-actions/commit/70d2b11807373845aaed4d619872985922939927))
 
 
