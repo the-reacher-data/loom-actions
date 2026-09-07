@@ -34,30 +34,36 @@ def _steps(job: str) -> list[dict[str, Any]]:
     return cast(list[dict[str, Any]], _job(job)["steps"])
 
 
-class TestPublishingIsOptIn:
-    def test_publishing_is_off_unless_the_caller_asks(self) -> None:
-        publish = _inputs()["publish-to-pypi"]
+class TestBuildingIsOptIn:
+    def test_building_is_off_unless_the_caller_asks(self) -> None:
+        publish = _inputs()["build-distribution"]
         assert publish["type"] == "boolean"
         assert publish["default"] is False
         assert publish["required"] is False
 
-    def test_nothing_is_built_when_publishing_is_off(self) -> None:
-        assert _job("build")["if"] == "${{ inputs.publish-to-pypi }}"
+    def test_nothing_is_built_when_building_is_off(self) -> None:
+        assert _job("build")["if"] == "${{ inputs.build-distribution }}"
 
-    def test_the_upload_is_skipped_when_publishing_is_off(self) -> None:
-        publish = [s for s in _steps("release") if "pypi-publish" in str(s.get("uses"))]
-        assert len(publish) == 1
-        assert publish[0]["if"] == "${{ inputs.publish-to-pypi }}"
+    def test_no_upload_happens_here(self) -> None:
+        """PyPI's trusted publishing rejects a token minted for a reusable workflow."""
+        for job in ("plan", "build", "release"):
+            for step in _steps(job):
+                assert "pypi-publish" not in str(step.get("uses")), job
 
-    def test_a_caller_that_does_not_publish_still_gets_a_release(self) -> None:
+    def test_a_caller_that_does_not_build_still_gets_a_release(self) -> None:
         release = [s for s in _steps("release") if "action-gh-release" in str(s.get("uses"))]
         assert len(release) == 1
         assert "if" not in release[0]
 
-    def test_publishing_without_a_package_name_fails_closed(self) -> None:
-        guard = [s for s in _steps("plan") if s.get("name") == "Require a package name when publishing"]
+    def test_building_without_a_package_name_fails_closed(self) -> None:
+        guard = [s for s in _steps("plan") if s.get("name") == "Require a package name when building"]
         assert len(guard) == 1
-        assert guard[0]["if"] == "${{ inputs.publish-to-pypi && inputs.package-name == '' }}"
+        assert guard[0]["if"] == "${{ inputs.build-distribution && inputs.package-name == '' }}"
+
+    def test_the_distribution_is_left_for_the_caller_to_publish(self) -> None:
+        upload = [s for s in _steps("build") if "upload-artifact" in str(s.get("uses"))]
+        assert len(upload) == 1
+        assert upload[0]["with"]["name"] == "distributions"
 
 
 class TestTrigger:
@@ -90,11 +96,6 @@ class TestSafety:
         checkout = _steps("build")[0]
         assert checkout["with"]["fetch-depth"] == 0
         assert "needs.plan.outputs.version" in cast(str, checkout["with"]["ref"])
-
-    def test_publishing_uses_no_password(self) -> None:
-        publish = [s for s in _steps("release") if "pypi-publish" in str(s.get("uses"))][0]
-        assert "with" not in publish
-        assert _job("release")["permissions"]["id-token"] == "write"
 
     def test_the_planner_takes_its_token_as_an_input(self) -> None:
         action = cast(dict[str, Any], yaml.safe_load(ACTION.read_text(encoding="utf-8")))
