@@ -1,0 +1,71 @@
+name: "Plan release"
+description: "Decide the version a labelled merge releases, and write its notes"
+
+inputs:
+  merge-sha:
+    description: "Commit the release is cut from"
+    required: true
+  repository-slug:
+    description: "owner/repo the pull requests live in"
+    required: true
+  notes-output:
+    description: "File the release notes are written to"
+    required: false
+    default: "CHANGELOG_RELEASE.md"
+  github-token:
+    description: "Token used to read the pull request of each shipped commit"
+    required: true
+
+outputs:
+  version:
+    description: "Version the release publishes"
+    value: ${{ steps.plan.outputs.version }}
+  part:
+    description: "Version part the shipped branches asked for"
+    value: ${{ steps.plan.outputs.part }}
+  notes-file:
+    description: "File holding the release notes"
+    value: ${{ inputs.notes-output }}
+
+runs:
+  using: composite
+  steps:
+    - name: Plan the release
+      id: plan
+      shell: bash
+      env:
+        MERGE_SHA: ${{ inputs.merge-sha }}
+        REPOSITORY_SLUG: ${{ inputs.repository-slug }}
+        NOTES_OUTPUT: ${{ inputs.notes-output }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python3 "${ACTION_PATH}/src/plan_release.py" \
+          --merge-sha "${MERGE_SHA}" --slug "${REPOSITORY_SLUG}" | tee plan.txt
+        PLAN=$(python3 "${ACTION_PATH}/src/plan_release.py" \
+          --merge-sha "${MERGE_SHA}" --slug "${REPOSITORY_SLUG}" --format github)
+        VERSION=$(jq -r .version <<< "${PLAN}")
+        PART=$(jq -r .part <<< "${PLAN}")
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "part=${PART}" >> "$GITHUB_OUTPUT"
+        {
+          echo "## Release v${VERSION}"
+          echo
+          echo '```'
+          cat plan.txt
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Write the release notes
+      shell: bash
+      env:
+        MERGE_SHA: ${{ inputs.merge-sha }}
+        VERSION: ${{ steps.plan.outputs.version }}
+        NOTES_OUTPUT: ${{ inputs.notes-output }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        git checkout --detach "${MERGE_SHA}"
+        python3 "${ACTION_PATH}/src/build_release_notes.py" \
+          --version "${VERSION}" --output "${NOTES_OUTPUT}"
