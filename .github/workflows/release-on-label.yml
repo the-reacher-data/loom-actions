@@ -43,6 +43,13 @@ on:
         required: false
         type: string
         default: ""
+    outputs:
+      version:
+        description: "Version the release published"
+        value: ${{ jobs.plan.outputs.version }}
+      distribution-built:
+        description: "Whether a distribution was built and left as an artifact"
+        value: ${{ jobs.build.result == 'success' }}
 
 jobs:
   plan:
@@ -88,9 +95,12 @@ jobs:
           echo "build-distribution needs package-name to check the built version against the tag."
           exit 1
 
+      # Tracks the floating major tag, not master: a reusable workflow cannot use
+      # a path-relative action, and the caller's SHA pin would otherwise mean
+      # nothing while this reference moved on every push.
       - name: Plan the release
         id: plan
-        uses: the-reacher-data/loom-actions/actions/release/plan-release@master
+        uses: the-reacher-data/loom-actions/actions/release/plan-release@v1
         with:
           merge-sha: ${{ env.MERGE_SHA }}
           repository-slug: ${{ github.repository }}

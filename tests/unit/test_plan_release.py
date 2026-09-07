@@ -144,6 +144,18 @@ class TestPlanRelease:
 
         assert plan.version == "1.10.1"
 
+    def test_a_rerun_of_a_tagged_release_plans_the_same_version(self, tmp_path: Path) -> None:
+        repository = _repository(tmp_path, _rules_toml())
+        _git(repository, "tag", "v1.10.0")
+        feature = _commit(repository, "feat: one")
+        marked = _commit(repository, "fix: two")
+        _git(repository, "tag", "v1.11.0", marked)
+        refs = {feature: ("feat/one",), marked: ("fix/two",)}
+
+        plan = plan_release(repository, marked, lambda sha: refs[sha])
+
+        assert (plan.last_tag, plan.version) == ("v1.10.0", "1.11.0")
+
     def test_refuses_a_range_that_ships_no_version(self, tmp_path: Path) -> None:
         repository = _repository(tmp_path, _rules_toml())
         _git(repository, "tag", "v1.10.0")
@@ -152,13 +164,16 @@ class TestPlanRelease:
         with pytest.raises(ReleasePlanError, match="ships no version"):
             plan_release(repository, only, lambda _sha: ("ci/one",))
 
-    def test_refuses_an_empty_range(self, tmp_path: Path) -> None:
+    def test_a_commit_carrying_the_only_tag_is_planned_from_the_start(
+        self, tmp_path: Path
+    ) -> None:
         repository = _repository(tmp_path, _rules_toml())
         _git(repository, "tag", "v1.10.0")
         head = _git(repository, "rev-parse", "HEAD")
 
-        with pytest.raises(ReleasePlanError, match="nothing to release"):
-            plan_release(repository, head, lambda _sha: ("fix/x",))
+        plan = plan_release(repository, head, lambda _sha: ("fix/x",))
+
+        assert (plan.last_tag, plan.version) == (None, "0.0.1")
 
     def test_refuses_a_commit_that_belongs_to_no_pull_request(self, tmp_path: Path) -> None:
         repository = _repository(tmp_path, _rules_toml())
