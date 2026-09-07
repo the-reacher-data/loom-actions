@@ -100,3 +100,19 @@ class TestSafety:
     def test_the_planner_takes_its_token_as_an_input(self) -> None:
         action = cast(dict[str, Any], yaml.safe_load(ACTION.read_text(encoding="utf-8")))
         assert action["inputs"]["github-token"]["required"] is True
+
+
+class TestWhatACallerCanRelyOn:
+    def test_the_inner_action_is_not_tracked_on_master(self) -> None:
+        """A caller pins this workflow by SHA; a moving reference inside it would
+        put unreviewed action code into that caller's release."""
+        plan = next(s for s in _steps("plan") if s.get("id") == "plan")
+        _, _, revision = cast(str, plan["uses"]).partition("@")
+        assert revision != "master"
+
+    def test_a_caller_learns_whether_a_distribution_exists(self) -> None:
+        workflow = cast(dict[Any, Any], _workflow())
+        triggers = cast(dict[str, Any], workflow.get("on", workflow.get(True)))
+        outputs = cast(dict[str, Any], triggers["workflow_call"]["outputs"])
+        assert "jobs.build.result" in cast(str, outputs["distribution-built"]["value"])
+        assert "jobs.plan.outputs.version" in cast(str, outputs["version"]["value"])

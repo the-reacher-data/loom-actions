@@ -28,8 +28,17 @@ def _run_git(repository: Path, *arguments: str) -> str:
     return completed.stdout
 
 
+def _tagged_commit(repository: Path, tag: str) -> str:
+    return _run_git(repository, "rev-list", "-n", "1", tag).strip()
+
+
 def latest_release_tag(repository: Path) -> str | None:
-    """Return the highest version tag reachable from HEAD, or None when there is none."""
+    """Return the highest version tag before HEAD, ignoring a tag on HEAD itself.
+
+    Notes are rebuilt when a release is re-run for a commit that is already
+    tagged, so a tag pointing at HEAD is not a release that preceded it.
+    """
+    head = _run_git(repository, "rev-parse", "HEAD").strip()
     output = _run_git(
         repository,
         "tag",
@@ -41,6 +50,8 @@ def latest_release_tag(repository: Path) -> str | None:
     )
     for line in output.splitlines():
         candidate = line.strip()
+        if _RELEASE_TAG.match(candidate) and _tagged_commit(repository, candidate) == head:
+            continue
         if _RELEASE_TAG.match(candidate):
             return candidate
     return None
