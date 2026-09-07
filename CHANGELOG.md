@@ -1,3 +1,55 @@
+# 🚀 Release 1.2.2 ([#31](https://github.com/the-reacher-data/loom-actions/pull/31)) ([`e594096`](https://github.com/the-reacher-data/loom-actions/commit/e59409611f0de4ecffe889dd0c7734fb23d9bd09))
+
+
+
+## 🐛 Fixes
+### release
+- **release:** let a re-run of a tagged release plan the same version<br>
+  > Recovering a release that stopped after tagging was documented as a dispatch
+  > with the merge SHA, and it could not work: the planner read the highest tag
+  > reachable from that commit, which now included the tag the halted run had just
+  > created, so the range was empty and the run refused with "nothing to release".
+  > loom-py's v1.11.0 is in exactly that state — tagged and released, never
+  > uploaded.
+  > A tag pointing at the commit being released is not a release that preceded it,
+  > so it is ignored when choosing the previous tag. The re-run then plans the same
+  > version, finds the tag already pointing at the right commit, and carries on to
+  > the upload.
+  > Removing the guard turns two tests red. The empty-range refusal is now
+  > unreachable through this path, so its test asserts what the code does instead:
+  > a commit carrying the only tag is planned from the start of history.
+  > Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+  > Claude-Session: https://claude.ai/code/session_016xY1skW5S2PU9Fc3M7tfAW
+
+- **release:** the same tag-on-HEAD defect, in the copy nobody tested<br>
+  > An independent audit found the fix for the previous commit landed in one of two
+  > places. build_release_notes.py has its own latest_release_tag, with the same
+  > rule and the same bug: the action detaches at the released commit and runs it,
+  > so a re-run for an already tagged commit read its own tag as the previous
+  > release, saw an empty range, and refused. The next dispatch would have died in
+  > the plan job, before the tag step, before the upload.
+  > That module had no test file at all, which is why the bug survived a fix aimed
+  > at itself. It has nine now, including the re-run.
+  > The reusable workflow also called its own action at @master while callers pin
+  > the workflow by SHA, so unreviewed action code reached a pinned release. It
+  > tracks the floating major tag instead, and a test refuses master. A caller can
+  > now read whether a distribution was built rather than inferring it from the
+  > aggregate result of the called workflow.
+  > Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+  > Claude-Session: https://claude.ai/code/session_016xY1skW5S2PU9Fc3M7tfAW
+  > --------
+  > Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.2.1 ([#29](https://github.com/the-reacher-data/loom-actions/pull/29)) ([`eb68725`](https://github.com/the-reacher-data/loom-actions/commit/eb6872566d79eb09bae5b68ffa73362c407b0eea))
 
 
