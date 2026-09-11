@@ -91,6 +91,31 @@ def classify_branch(head_ref: str, rules: Mapping[str, tuple[str, ...]]) -> str 
     )
 
 
+_BREAK_SUBJECT = re.compile(r"[a-zA-Z]+(?:\([^)]*\))?!:")
+_BREAK_FOOTER = re.compile(r"^BREAKING[ -]CHANGE:", re.MULTILINE)
+
+
+def declares_break(message: str) -> bool:
+    """Return whether *message* declares a breaking change, per Conventional Commits.
+
+    Two spellings carry it: a ``!`` before the colon of the subject, and a
+    ``BREAKING CHANGE:`` (or ``BREAKING-CHANGE:``) footer.
+
+    Args:
+        message: The commit's full message, subject and body.
+
+    Returns:
+        Whether the commit declares a break.
+    """
+    subject, _, body = message.partition("\n")
+    return bool(_BREAK_SUBJECT.match(subject.strip()) or _BREAK_FOOTER.search(body))
+
+
+def commit_message(repository: Path, sha: str) -> str:
+    """Return the full message of *sha*."""
+    return _run(("git", "-C", str(repository), "log", "-1", "--pretty=%B", sha))
+
+
 def highest_part(parts: Iterable[str | None]) -> str | None:
     """Return the largest part among *parts*, or None when every one ships nothing."""
     present = {part for part in parts if part is not None}
@@ -176,8 +201,10 @@ def plan_release(
     """Return the release *merge_sha* ships, from the branches merged since the last tag.
 
     The part is the highest one any shipped branch asks for, so a batch holding a
-    feature never ships as a patch. A commit with no pull request, or one whose
-    branch matches no declared class, refuses the release instead of lowering it.
+    feature never ships as a patch. A commit declaring a break — a ``!`` in its
+    subject or a ``BREAKING CHANGE:`` footer — asks for a major whatever its
+    branch asks for. A commit with no pull request, or one whose branch matches
+    no declared class, refuses the release instead of lowering it.
 
     Args:
         repository:           Checkout to read tags and commits from.
@@ -206,8 +233,10 @@ def plan_release(
             raise ReleasePlanError(
                 f"commit {sha} belongs to no pull request: a direct push cannot be classified"
             )
+        marked = declares_break(commit_message(repository, sha))
         for head_ref in head_refs:
-            shipped.append(ShippedPullRequest(sha, head_ref, classify_branch(head_ref, rules)))
+            branch_part = classify_branch(head_ref, rules)
+            shipped.append(ShippedPullRequest(sha, head_ref, "major" if marked else branch_part))
 
     part = highest_part(entry.part for entry in shipped)
     if part is None:

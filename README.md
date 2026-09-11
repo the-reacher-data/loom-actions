@@ -11,7 +11,7 @@ Reusable GitHub Actions for Python projects using Trunk-Based Development and Co
 ## Features
 
 - Trunk-based release flow on `master`
-- Semantic versioning from merged branch name
+- Semantic versioning from merged branch name, raised to a major by a commit that declares a break (`type!:` or a `BREAKING CHANGE:` footer)
 - Changelog generation from Conventional Commits + PR preview comment
 - Unified Python quality report in PRs (ruff + pyright + pytest/coverage + bandit)
 - Local and CI test strategy (`make` + `act` + GitHub workflows)
