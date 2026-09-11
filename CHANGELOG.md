@@ -1,3 +1,20 @@
+# 🚀 Release 1.2.3 ([#33](https://github.com/the-reacher-data/loom-actions/pull/33)) ([`facf1a8`](https://github.com/the-reacher-data/loom-actions/commit/facf1a8c5d86658099fcfa9205ea9aad5e55da33))
+
+
+
+## 🐛 Fixes
+### release
+- **release:** let a commit's breaking marker raise the version
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.2.2 ([#31](https://github.com/the-reacher-data/loom-actions/pull/31)) ([`e594096`](https://github.com/the-reacher-data/loom-actions/commit/e59409611f0de4ecffe889dd0c7734fb23d9bd09))
 
 
