@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "actions" / "release" / "plan
 from plan_release import (  # noqa: E402
     ReleasePlanError,
     classify_branch,
+    declares_break,
     highest_part,
     next_version,
     plan_release,
@@ -78,6 +79,33 @@ class TestClassifyBranch:
             classify_branch("spike/x", _RULES)
 
 
+class TestDeclaresBreak:
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "feat!: drop it",
+            "feat(api)!: drop it",
+            "fix: keep it\n\nBREAKING CHANGE: the field is gone",
+            "fix: keep it\n\nBREAKING-CHANGE: the field is gone",
+        ],
+    )
+    def test_reads_every_spelling_of_the_marker(self, message: str) -> None:
+        assert declares_break(message) is True
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "feat: add it",
+            "fix(api): repair it",
+            "docs: say that this is a BREAKING CHANGE for consumers",
+            "feat: the ! belongs to the prose, not to the type",
+            "fix: repair the parser!: only the type may carry the marker",
+        ],
+    )
+    def test_does_not_read_a_break_where_there_is_none(self, message: str) -> None:
+        assert declares_break(message) is False
+
+
 class TestHighestPart:
     def test_a_feature_in_the_batch_wins_over_every_fix(self) -> None:
         assert highest_part(["patch", "minor", "patch", None]) == "minor"
@@ -120,16 +148,50 @@ class TestPlanRelease:
         assert (plan.last_tag, plan.part, plan.version) == ("v1.10.0", "minor", "1.11.0")
         assert len(plan.shipped) == 3
 
-    def test_the_marked_commit_carries_no_special_weight(self, tmp_path: Path) -> None:
+    def test_an_unmarked_batch_takes_the_part_its_branches_ask_for(self, tmp_path: Path) -> None:
         repository = _repository(tmp_path, _rules_toml())
         _git(repository, "tag", "v1.10.0")
         feature = _commit(repository, "feat: one")
-        marked = _commit(repository, "fix: two")
-        refs = {feature: ("feat/one",), marked: ("fix/two",)}
+        fix = _commit(repository, "fix: two")
+        refs = {feature: ("feat/one",), fix: ("fix/two",)}
+
+        plan = plan_release(repository, fix, lambda sha: refs[sha])
+
+        assert plan.version == "1.11.0"
+
+    def test_a_marked_commit_ships_a_major_whatever_its_branch_asks_for(
+        self, tmp_path: Path
+    ) -> None:
+        repository = _repository(tmp_path, _rules_toml())
+        _git(repository, "tag", "v1.10.0")
+        marked = _commit(repository, "feat(api)!: rename the field")
+        refs = {marked: ("feat/rename",)}
 
         plan = plan_release(repository, marked, lambda sha: refs[sha])
 
-        assert plan.version == "1.11.0"
+        assert (plan.part, plan.version) == ("major", "2.0.0")
+
+    def test_a_footer_declaring_the_break_ships_a_major_too(self, tmp_path: Path) -> None:
+        repository = _repository(tmp_path, _rules_toml())
+        _git(repository, "tag", "v1.10.0")
+        marked = _commit(repository, "fix: drop the parameter\n\nBREAKING CHANGE: it is gone")
+        refs = {marked: ("fix/drop",)}
+
+        plan = plan_release(repository, marked, lambda sha: refs[sha])
+
+        assert (plan.part, plan.version) == ("major", "2.0.0")
+
+    def test_a_marked_commit_on_a_branch_that_ships_nothing_still_ships_a_major(
+        self, tmp_path: Path
+    ) -> None:
+        repository = _repository(tmp_path, _rules_toml())
+        _git(repository, "tag", "v1.10.0")
+        marked = _commit(repository, "ci!: drop the published output")
+        refs = {marked: ("ci/drop",)}
+
+        plan = plan_release(repository, marked, lambda sha: refs[sha])
+
+        assert (plan.part, plan.version) == ("major", "2.0.0")
 
     def test_a_range_ending_before_a_feature_leaves_it_for_the_next_release(
         self, tmp_path: Path
