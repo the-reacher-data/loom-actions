@@ -1,3 +1,20 @@
+# 🚀 Release 1.3.0 ([#35](https://github.com/the-reacher-data/loom-actions/pull/35)) ([`433c52c`](https://github.com/the-reacher-data/loom-actions/commit/433c52cd7e58127c0cb263a924a9f3a2b8d756ad))
+
+
+## ✨ Features
+### workflows
+- **workflows:** add reusable python-service-ci workflow
+
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.2.3 ([#33](https://github.com/the-reacher-data/loom-actions/pull/33)) ([`facf1a8`](https://github.com/the-reacher-data/loom-actions/commit/facf1a8c5d86658099fcfa9205ea9aad5e55da33))
 
 
