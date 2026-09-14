@@ -46,6 +46,23 @@ them travel through the environment means escaping the reference for the inner s
 (`\"\$SRC_DIR\"`) at each site. That is worth doing when `run_check` is restructured; it is
 recorded here rather than left silent.
 
+## python-service-ci: the quality report blocks only on security
+
+`quality-report` runs its own ruff (`~=0.6`) and pyright. A service locks its own ruff and
+type checker (mypy), so gating on the report's versions would block on rules the project never
+chose. The workflow gates ruff and mypy in `lint` with the locked tools, tests and coverage in
+`test` on the run that measured them, and calls the report with `fail-on-quality: none` and
+`test-results-dir: .`: it adds pyright and bandit to the PR comment and blocks on bandit only.
+
+## python-service-ci: one workflow, one required check
+
+Splitting lint, tests, scanners and the image into separate reusable workflows would give each
+caller several calls to keep on the same version and several checks to require. One workflow
+with a `gate` job that needs every other job keeps branch protection to `ci / gate` and lets a
+job be skipped (a scanner that is off) without a required check going missing. Publishing an
+image is a different trigger with different permissions (`id-token: write`), so it belongs in
+its own workflow, not behind an input here.
+
 ## What cannot be tested here
 
 These are exercised by a real release and by nothing else. They are listed so nobody reads
@@ -55,7 +72,10 @@ their absence as coverage:
 - pushing an immutable version tag;
 - moving the floating major tag;
 - creating a GitHub Release;
-- the merge event that a release label triggers, which needs a genuinely merged pull request.
+- the merge event that a release label triggers, which needs a genuinely merged pull request;
+- `python-service-ci.yml` end to end: its contract is tested and it passes actionlint, but the
+  Codecov, SonarQube and Snyk jobs need real tokens, and the whole workflow only runs from a
+  caller once a tag contains it.
 
 Secret-dependent stages — Sonar, Snyk, TestPyPI — cannot run in a fixture pipeline that has
 no tokens. When they are skipped they must **say so**, in the job summary and as an

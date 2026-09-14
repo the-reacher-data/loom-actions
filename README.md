@@ -26,6 +26,63 @@ Reusable GitHub Actions for Python projects using Trunk-Based Development and Co
 | Release | `actions/release/changelog-conventional-commit` | Build changelog markdown from Conventional Commits | ✅ Ready |
 | Python | `actions/python/quality-report` | Aggregated quality/security report and fail gates | ✅ Ready |
 
+## Reusable Workflows
+
+| Workflow | Purpose |
+|---|---|
+| `.github/workflows/python-service-ci.yml` | CI for a Python service shipped as a container image: lint, tests, quality report, image build/smoke/scan, optional Codecov/SonarQube/Snyk, one `gate` check |
+| `.github/workflows/release-on-label.yml` | Trunk-based release: tag, notes and GitHub Release when a pull request labelled `release` merges; building a distribution is opt-in |
+
+### python-service-ci
+
+```yaml
+name: ci
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  ci:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: the-reacher-data/loom-actions/.github/workflows/python-service-ci.yml@<sha> # vX.Y.Z
+    with:
+      python-version: "3.13"
+      image-smoke-command: python -c "import app.main"
+      sonar: true
+      sonar-project-key: ${{ vars.SONAR_PROJECT_KEY }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+```
+
+| Job | Runs | Blocks on |
+|---|---|---|
+| `lint` | always | `uv sync --locked`, ruff, ruff format, mypy (`typecheck`) |
+| `test` | always | pytest failures, coverage under `coverage-threshold` |
+| `report` | always | bandit at `fail-on-security`; posts the quality report to the PR and the job summary; uploads to Codecov when `codecov` |
+| `sonar` | `sonar: true` | missing `SONAR_TOKEN` or `sonar-project-key`, scanner failure |
+| `dependencies` | `snyk: true` | missing `SNYK_TOKEN`, vulnerable locked runtime dependency (a scanner outage only warns) |
+| `image` | `image: true` | build, `image-smoke-command`, fixable vulnerabilities at `image-scan-severity` |
+| `branch` | pull requests | a branch name no `[tool.semantic_branch]` class matches |
+| `gate` | always | any job above failed or was cancelled |
+
+- Require only `ci / gate` in branch protection.
+- Codecov, SonarQube and Snyk are off by default and need no secret while off. Secrets are
+  passed explicitly (`secrets: inherit` does not cross organizations).
+- The repository must commit `uv.lock`; every install runs with `--locked`.
+- A pull request from a fork skips the secret-dependent jobs and the PR comment.
+- Nothing is pushed or deployed. The image uses the `gha` layer cache (`scope=image`), shared
+  by pull requests and the trunk, so a later publishing stage can reuse the tested layers.
+
 ## Quality Budgets
 
 Default budgets for `actions/python/quality-report`:
