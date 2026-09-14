@@ -1,0 +1,562 @@
+name: python-service-ci
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version the service runs on"
+        required: true
+        type: string
+      uv-version:
+        description: "uv version, pinned"
+        required: false
+        type: string
+        default: "0.10.2"
+      src-dir:
+        description: "Source directory"
+        required: false
+        type: string
+        default: "src"
+      test-dir:
+        description: "Test directory"
+        required: false
+        type: string
+        default: "tests"
+      typecheck:
+        description: "Run mypy over src-dir"
+        required: false
+        type: boolean
+        default: true
+      coverage-threshold:
+        description: "Minimum total coverage, in percent; 0 turns the gate off"
+        required: false
+        type: number
+        default: 80
+      fail-on-security:
+        description: "Bandit severity that blocks: none, low, medium or high"
+        required: false
+        type: string
+        default: "high"
+      codecov:
+        description: "Upload coverage and test results to Codecov"
+        required: false
+        type: boolean
+        default: false
+      sonar:
+        description: "Run a SonarQube or SonarCloud analysis"
+        required: false
+        type: boolean
+        default: false
+      sonar-host-url:
+        description: "SonarQube server; SonarCloud by default"
+        required: false
+        type: string
+        default: "https://sonarcloud.io"
+      sonar-project-key:
+        description: "Sonar project key, required when sonar is on"
+        required: false
+        type: string
+        default: ""
+      sonar-organization:
+        description: "SonarCloud organization; empty for a self-hosted server"
+        required: false
+        type: string
+        default: ""
+      snyk:
+        description: "Scan the locked runtime dependencies with Snyk"
+        required: false
+        type: boolean
+        default: false
+      snyk-severity-threshold:
+        description: "Lowest Snyk severity that blocks: low, medium, high or critical"
+        required: false
+        type: string
+        default: "high"
+      image:
+        description: "Build the container image"
+        required: false
+        type: boolean
+        default: true
+      image-context:
+        description: "Docker build context"
+        required: false
+        type: string
+        default: "."
+      dockerfile:
+        description: "Dockerfile path, relative to the repository root"
+        required: false
+        type: string
+        default: "Dockerfile"
+      image-smoke-command:
+        description: "Shell command run inside the built image; empty skips the smoke test"
+        required: false
+        type: string
+        default: ""
+      image-scan:
+        description: "Scan the built image for fixable vulnerabilities with Grype"
+        required: false
+        type: boolean
+        default: true
+      image-scan-severity:
+        description: "Lowest fixable image vulnerability severity that blocks"
+        required: false
+        type: string
+        default: "critical"
+    secrets:
+      CODECOV_TOKEN:
+        description: "Codecov upload token; public repositories can upload without it"
+        required: false
+      SONAR_TOKEN:
+        description: "SonarQube token, required when sonar is on"
+        required: false
+      SNYK_TOKEN:
+        description: "Snyk token, required when snyk is on"
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SRC_DIR: ${{ inputs.src-dir }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ inputs.uv-version }}
+          python-version: ${{ inputs.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install the locked environment
+        run: |
+          set -euo pipefail
+          if [ ! -f uv.lock ]; then
+            echo "::error title=uv.lock is missing::Commit uv.lock ('uv lock'): CI and the image install exactly that resolution."
+            exit 1
+          fi
+          uv sync --locked
+
+      - name: Ruff
+        run: |
+          set -euo pipefail
+          uv run --locked ruff check --output-format=github .
+          uv run --locked ruff format --check .
+
+      - name: Mypy
+        if: ${{ inputs.typecheck }}
+        run: uv run --locked mypy "${SRC_DIR}"
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      SRC_DIR: ${{ inputs.src-dir }}
+      TEST_DIR: ${{ inputs.test-dir }}
+      COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ inputs.uv-version }}
+          python-version: ${{ inputs.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Run the test suite with coverage
+        run: |
+          set -euo pipefail
+          uv run --locked --with "pytest-cov==7.1.0" pytest "${TEST_DIR}" \
+            --cov="${SRC_DIR}" \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov-report=json:coverage.json \
+            --cov-fail-under="${COVERAGE_THRESHOLD}" \
+            --junitxml=junit.xml -o junit_family=legacy
+
+      - name: Store test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results
+          path: |
+            junit.xml
+            coverage.xml
+            coverage.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  report:
+    name: report
+    needs: test
+    if: ${{ !cancelled() && needs.test.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      FAIL_ON_SECURITY: ${{ inputs.fail-on-security }}
+      SAME_REPOSITORY: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ inputs.uv-version }}
+          python-version: ${{ inputs.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Download test results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: test-results
+
+      - name: Quality report
+        id: quality
+        continue-on-error: true
+        uses: the-reacher-data/loom-actions/actions/python/quality-report@017878a375d4728129792fee009296635884b6d3 # v1.2.3
+        with:
+          src-dir: ${{ inputs.src-dir }}
+          test-dir: ${{ inputs.test-dir }}
+          coverage-threshold: ${{ inputs.coverage-threshold }}
+          fail-on-quality: "none"
+          fail-on-security: ${{ inputs.fail-on-security }}
+          include-security: "true"
+          test-results-dir: "."
+
+      - name: Publish the report to the job summary
+        if: ${{ always() && steps.quality.outputs.report-file != '' }}
+        env:
+          REPORT_FILE: ${{ steps.quality.outputs.report-file }}
+        run: cat "${REPORT_FILE}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the report on the pull request
+        if: ${{ always() && github.event_name == 'pull_request' && env.SAME_REPOSITORY == 'true' && steps.quality.outputs.report-file != '' }}
+        uses: the-reacher-data/loom-actions/actions/core/pr-comment-update@017878a375d4728129792fee009296635884b6d3 # v1.2.3
+        with:
+          github-token: ${{ github.token }}
+          tags: "<!-- loom-quality-report -->"
+          body-file: ${{ steps.quality.outputs.report-file }}
+
+      - name: Check the Codecov token
+        if: ${{ inputs.codecov }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CODECOV_TOKEN}" ]; then
+            echo "::warning title=Codecov has no token::codecov is on but CODECOV_TOKEN was not passed. A public repository uploads without it; a private one uploads nothing."
+          fi
+
+      - name: Upload coverage to Codecov
+        if: ${{ inputs.codecov && !cancelled() && hashFiles('coverage.xml') != '' }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ inputs.codecov && !cancelled() && hashFiles('junit.xml') != '' }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ./junit.xml
+          report_type: test_results
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Enforce the security gate
+        if: ${{ always() }}
+        env:
+          OUTCOME: ${{ steps.quality.outcome }}
+          BLOCKING: ${{ steps.quality.outputs.blocking }}
+        run: |
+          set -euo pipefail
+          if [ "${OUTCOME}" != "success" ]; then
+            echo "::error title=Quality report did not complete::Read the 'Quality report' step: no finding was cleared."
+            exit 1
+          fi
+          if [ "${BLOCKING}" = "true" ]; then
+            echo "::error title=Security gate::bandit reported issues at or above '${FAIL_ON_SECURITY}'."
+            exit 1
+          fi
+
+  sonar:
+    name: sonar
+    needs: test
+    if: >-
+      ${{ inputs.sonar && !cancelled() && needs.test.result != 'skipped'
+          && (github.event_name != 'pull_request'
+              || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the SonarQube configuration
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ inputs.sonar-project-key }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${SONAR_TOKEN}" ] || missing="${missing} SONAR_TOKEN(secret)"
+          [ -n "${SONAR_PROJECT_KEY}" ] || missing="${missing} sonar-project-key(input)"
+          if [ -n "${missing}" ]; then
+            echo "::error title=SonarQube is on but not configured::missing:${missing}. Provide them or turn sonar off."
+            exit 1
+          fi
+
+      - name: Download test results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: test-results
+
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ inputs.sonar-project-key }}
+            -Dsonar.sources=${{ inputs.src-dir }}
+            -Dsonar.tests=${{ inputs.test-dir }}
+            -Dsonar.python.version=${{ inputs.python-version }}
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.python.xunit.reportPath=junit.xml
+            ${{ inputs.sonar-organization != '' && format('-Dsonar.organization={0}', inputs.sonar-organization) || '' }}
+
+  dependencies:
+    name: dependencies
+    if: >-
+      ${{ inputs.snyk
+          && (github.event_name != 'pull_request'
+              || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require the Snyk token
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SNYK_TOKEN}" ]; then
+            echo "::error title=Snyk is on but not configured::missing SNYK_TOKEN(secret). Provide it or turn snyk off."
+            exit 1
+          fi
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ inputs.uv-version }}
+          python-version: ${{ inputs.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install the locked runtime dependencies
+        run: |
+          set -euo pipefail
+          uv export --locked --no-dev --no-emit-project --no-hashes -o "${RUNNER_TEMP}/requirements.txt"
+          uv export --locked --no-dev --no-emit-project -o "${RUNNER_TEMP}/hashed-requirements.txt"
+          uv venv --seed "${RUNNER_TEMP}/snyk-venv"
+          uv pip install --python "${RUNNER_TEMP}/snyk-venv" --require-hashes \
+            -r "${RUNNER_TEMP}/hashed-requirements.txt"
+
+      - uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
+
+      - name: Snyk test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SEVERITY: ${{ inputs.snyk-severity-threshold }}
+        run: |
+          set -uo pipefail
+          snyk test \
+            --file="${RUNNER_TEMP}/requirements.txt" \
+            --package-manager=pip \
+            --command="${RUNNER_TEMP}/snyk-venv/bin/python" \
+            --severity-threshold="${SEVERITY}" \
+            --skip-unresolved \
+            --project-name="${GITHUB_REPOSITORY}"
+          rc=$?
+          case "${rc}" in
+            0)
+              echo "## Snyk: no dependency vulnerable at or above \`${SEVERITY}\`" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            1)
+              echo "::error title=Snyk found vulnerable dependencies::At or above '${SEVERITY}'; read the step log."
+              exit 1
+              ;;
+            *)
+              echo "::warning title=Snyk did not complete::Exit ${rc}. No dependency was cleared and none was reported vulnerable; this does not block. A 401 (SNYK-0005) means SNYK_TOKEN needs renewing."
+              echo "## Snyk did not complete (exit ${rc}): nothing was scanned" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+
+  image:
+    name: image
+    if: ${{ inputs.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: service
+          tags: |
+            type=sha,format=long
+
+      - name: Build the image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ inputs.image-context }}
+          file: ${{ inputs.dockerfile }}
+          load: true
+          push: false
+          pull: true
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,mode=max,scope=image
+
+      - name: Smoke test the image
+        if: ${{ inputs.image-smoke-command != '' }}
+        env:
+          IMAGE: ${{ steps.meta.outputs.tags }}
+          SMOKE_COMMAND: ${{ inputs.image-smoke-command }}
+        run: docker run --rm --entrypoint /bin/sh "${IMAGE}" -c "${SMOKE_COMMAND}"
+
+      - name: Report the image size
+        env:
+          IMAGE: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          size=$(docker image inspect "${IMAGE}" --format '{{.Size}}')
+          echo "## Image: $((size / 1024 / 1024)) MiB" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Scan the image
+        id: scan
+        if: ${{ inputs.image-scan }}
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ${{ steps.meta.outputs.tags }}
+          fail-build: true
+          only-fixed: true
+          severity-cutoff: ${{ inputs.image-scan-severity }}
+          output-format: table
+          output-file: ${{ runner.temp }}/grype.txt
+
+      - name: Publish the scan to the job summary
+        if: ${{ always() && inputs.image-scan && steps.scan.outcome != 'skipped' }}
+        env:
+          SCAN_FILE: ${{ runner.temp }}/grype.txt
+        run: |
+          set -euo pipefail
+          if [ -s "${SCAN_FILE}" ]; then
+            {
+              echo "## Image vulnerabilities (fixable)"
+              echo '```'
+              cat "${SCAN_FILE}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  branch:
+    name: branch
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require a branch name the release can classify
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+          import tomllib
+
+          head = os.environ["HEAD_REF"]
+          with open("pyproject.toml", "rb") as handle:
+              rules = tomllib.load(handle).get("tool", {}).get("semantic_branch", {})
+          classes = ("major", "minor", "patch", "release_ignore")
+          for name in classes:
+              if any(re.fullmatch(pattern, head) for pattern in rules.get(name, ())):
+                  print(f"'{head}' is a {name} branch")
+                  sys.exit(0)
+          patterns = ", ".join(p for name in classes for p in rules.get(name, ())) or "none declared"
+          print(
+              f"::error title=Unclassified branch::'{head}' matches no class in "
+              f"[tool.semantic_branch], so a release would refuse it. Rename the branch "
+              f"(accepted: {patterns})."
+          )
+          sys.exit(1)
+          PY
+
+  gate:
+    name: gate
+    needs: [lint, test, report, sonar, dependencies, image, branch]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every job that ran to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "${NEEDS}"
+          failed=$(jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key] | join(", ")' <<< "${NEEDS}")
+          if [ -n "${failed}" ]; then
+            echo "::error title=CI failed::${failed}"
+            exit 1
+          fi
