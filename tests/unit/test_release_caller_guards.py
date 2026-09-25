@@ -50,3 +50,18 @@ def test_a_skipped_release_releases_and_builds_nothing() -> None:
 def test_a_resumed_run_passes_its_commit() -> None:
     release = _caller_jobs()["release"]
     assert release["with"]["merge-sha"] == "${{ inputs.merge_sha || '' }}"
+
+
+def _documented_caller() -> dict[str, dict[str, Any]]:
+    text = (Path(__file__).parents[2] / "PUBLISHING.md").read_text("utf-8")
+    block = text.split("```yaml\n", 1)[1].split("```", 1)[0]
+    return cast(dict[str, dict[str, Any]], yaml.safe_load(block)["jobs"])
+
+
+def test_the_documented_caller_is_the_tested_one() -> None:
+    documented, tested = _documented_caller(), _caller_jobs()
+    assert set(documented) == set(tested)
+    for name, job in documented.items():
+        assert job.get("if") == tested[name].get("if"), name
+        assert job["permissions"] == tested[name]["permissions"], name
+        assert set(job.get("with", {})) == set(tested[name].get("with", {})), name
