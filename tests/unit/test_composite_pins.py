@@ -16,7 +16,7 @@ import yaml
 
 ACTIONS = Path(__file__).parents[2] / "actions"
 PINNED = re.compile(r"^[^@]+@[0-9a-f]{40}$")
-COMPOSITES = ("python/quality-report", "core/setup-uv")
+COMPOSITES = ("python/quality-report", "core/setup-uv", "release/versioning-branch-semantic")
 
 
 def _uses(composite: str) -> list[str]:
