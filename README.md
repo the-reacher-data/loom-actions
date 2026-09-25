@@ -69,10 +69,10 @@ jobs:
 | `lint` | always | `uv sync --locked`, ruff, ruff format, mypy (`typecheck`) |
 | `test` | always | pytest failures, coverage under `coverage-threshold` |
 | `report` | always | bandit at `fail-on-security`; posts the quality report to the PR and the job summary; uploads to Codecov when `codecov` |
-| `sonar` | `sonar: true` | missing `SONAR_TOKEN` or `sonar-project-key`, scanner failure |
+| `sonar` | `sonar: true` | missing `SONAR_TOKEN` or `sonar-project-key`, scanner failure; neither with `sonar-blocking: false` |
 | `dependencies` | `snyk: true` | missing `SNYK_TOKEN`, vulnerable locked runtime dependency (a scanner outage only warns) |
 | `image` | `image: true` | build, `image-smoke-command`, fixable vulnerabilities at `image-scan-severity` |
-| `branch` | pull requests | a branch name no `[tool.semantic_branch]` class matches |
+| `branch` | pull requests | a branch name no `[tool.semantic_branch]` class matches, or a missing rules file |
 | `gate` | always | any job above failed or was cancelled |
 
 - Require only `ci / gate` in branch protection.
@@ -82,6 +82,38 @@ jobs:
 - A pull request from a fork skips the secret-dependent jobs and the PR comment.
 - Nothing is pushed or deployed. The image uses the `gha` layer cache (`scope=image`), shared
   by pull requests and the trunk, so a later publishing stage can reuse the tested layers.
+- `sonar-blocking: false` makes Sonar informative: a scan that fails, or `sonar: true`
+  without `SONAR_TOKEN` or `sonar-project-key`, leaves a notice and the `gate` ignores it.
+  It is `true` by default, so a Sonar failure blocks as before.
+
+#### A service in a monorepo
+
+When the Python project lives in a subdirectory, with its own `pyproject.toml` and
+`uv.lock`, pass `working-directory`:
+
+```yaml
+    with:
+      python-version: "3.12"
+      working-directory: apps/api
+      semantic-branch-config: apps/api/pyproject.toml
+      image-context: .
+      dockerfile: Dockerfile
+```
+
+| Input | Default | Relative to | Used by |
+|---|---|---|---|
+| `working-directory` | `.` | repository root, no trailing slash | `uv sync`, ruff, mypy, pytest, bandit, the quality report and Snyk run there; `uv.lock` is read from it |
+| `src-dir`, `test-dir` | `src`, `tests` | `working-directory` | mypy, pytest, the quality report, Sonar |
+| `semantic-branch-config` | empty: `<working-directory>/pyproject.toml` | repository root | `branch` |
+| `image-context`, `dockerfile` | `.`, `Dockerfile` | repository root | `image` |
+
+- Sonar and Codecov run from the repository root, so a `sonar-project.properties` there is
+  honoured; the sources, tests and reports they receive carry the `working-directory`
+  prefix (`apps/api/src`, `apps/api/coverage.xml`).
+- The paths inside `coverage.xml` are relative to the project, so a monorepo maps them for
+  Codecov with `fixes` in its `codecov.yml`.
+- With the defaults every path is the one used before, and the jobs are the same.
+- [`examples/monorepo`](examples/monorepo) is a runnable caller: `make act-monorepo`.
 
 ## Quality Budgets
 
@@ -187,7 +219,13 @@ With `act`:
 ```bash
 make act-unit
 make act-smoke
+make act-monorepo
 ```
+
+`make act-monorepo` runs `python-service-ci` over [`examples/monorepo`](examples/monorepo).
+act's artifact server only implements the protocol of `upload-artifact` and
+`download-artifact` v4, so the target runs a throwaway copy of the checkout in which those
+two pins are v4; every other step runs as on GitHub.
 
 ## Repository Workflows
 
