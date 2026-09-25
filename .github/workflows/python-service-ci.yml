@@ -12,13 +12,22 @@ on:
         required: false
         type: string
         default: "0.10.2"
+      working-directory:
+        description: >-
+          Directory of the Python project, relative to the repository root and without a
+          trailing slash; it holds pyproject.toml and uv.lock. uv, ruff, mypy, pytest and
+          bandit run there, and src-dir and test-dir are relative to it. Sonar, the image
+          and the branch check run from the root. Defaults to the root itself
+        required: false
+        type: string
+        default: "."
       src-dir:
-        description: "Source directory"
+        description: "Source directory, relative to working-directory"
         required: false
         type: string
         default: "src"
       test-dir:
-        description: "Test directory"
+        description: "Test directory, relative to working-directory"
         required: false
         type: string
         default: "tests"
@@ -47,6 +56,13 @@ on:
         required: false
         type: boolean
         default: false
+      sonar-blocking:
+        description: >-
+          Whether a Sonar analysis that fails, or is on without its token or project key,
+          fails the gate. When false, it leaves a notice and the gate ignores it
+        required: false
+        type: boolean
+        default: true
       sonar-host-url:
         description: "SonarQube server; SonarCloud by default"
         required: false
@@ -102,6 +118,14 @@ on:
         required: false
         type: string
         default: "critical"
+      semantic-branch-config:
+        description: >-
+          TOML file declaring [tool.semantic_branch] for the branch check, relative to the
+          repository root. Empty by default, in which case the pyproject.toml in
+          working-directory is read
+        required: false
+        type: string
+        default: ""
     secrets:
       CODECOV_TOKEN:
         description: "Codecov upload token; public repositories can upload without it"
@@ -117,6 +141,11 @@ defaults:
   run:
     shell: bash
 
+env:
+  # The project's files as seen from the repository root. Empty with the default
+  # working-directory, so every path is exactly the one used before.
+  PROJECT_PREFIX: ${{ inputs.working-directory != '.' && inputs.working-directory != '' && format('{0}/', inputs.working-directory) || '' }}
+
 jobs:
   lint:
     name: lint
@@ -124,6 +153,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     env:
       SRC_DIR: ${{ inputs.src-dir }}
     steps:
@@ -136,7 +168,7 @@ jobs:
           version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: ${{ env.PROJECT_PREFIX }}uv.lock
 
       - name: Install the locked environment
         run: |
@@ -163,6 +195,9 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     env:
       SRC_DIR: ${{ inputs.src-dir }}
       TEST_DIR: ${{ inputs.test-dir }}
@@ -177,7 +212,7 @@ jobs:
           version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: ${{ env.PROJECT_PREFIX }}uv.lock
 
       - name: Run the test suite with coverage
         run: |
@@ -196,9 +231,9 @@ jobs:
         with:
           name: test-results
           path: |
-            junit.xml
-            coverage.xml
-            coverage.json
+            ${{ env.PROJECT_PREFIX }}junit.xml
+            ${{ env.PROJECT_PREFIX }}coverage.xml
+            ${{ env.PROJECT_PREFIX }}coverage.json
           if-no-files-found: warn
           retention-days: 7
 
@@ -224,18 +259,20 @@ jobs:
           version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: ${{ env.PROJECT_PREFIX }}uv.lock
 
       - name: Download test results
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: test-results
+          path: ${{ inputs.working-directory }}
 
       - name: Quality report
         id: quality
         continue-on-error: true
-        uses: the-reacher-data/loom-actions/actions/python/quality-report@017878a375d4728129792fee009296635884b6d3 # v1.2.3
+        uses: the-reacher-data/loom-actions/actions/python/quality-report@90b0ee6af678dfecf92c18a87e2a5f8081644309 # v1.4.0
         with:
+          working-directory: ${{ inputs.working-directory }}
           src-dir: ${{ inputs.src-dir }}
           test-dir: ${{ inputs.test-dir }}
           coverage-threshold: ${{ inputs.coverage-threshold }}
@@ -269,18 +306,18 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        if: ${{ inputs.codecov && !cancelled() && hashFiles('coverage.xml') != '' }}
+        if: ${{ inputs.codecov && !cancelled() && hashFiles(format('{0}coverage.xml', env.PROJECT_PREFIX)) != '' }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
-          files: ./coverage.xml
+          files: ./${{ env.PROJECT_PREFIX }}coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
       - name: Upload test results to Codecov
-        if: ${{ inputs.codecov && !cancelled() && hashFiles('junit.xml') != '' }}
+        if: ${{ inputs.codecov && !cancelled() && hashFiles(format('{0}junit.xml', env.PROJECT_PREFIX)) != '' }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
-          files: ./junit.xml
+          files: ./${{ env.PROJECT_PREFIX }}junit.xml
           report_type: test_results
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
@@ -319,25 +356,40 @@ jobs:
           persist-credentials: false
 
       - name: Require the SonarQube configuration
+        id: config
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_PROJECT_KEY: ${{ inputs.sonar-project-key }}
+          SONAR_BLOCKING: ${{ inputs.sonar-blocking }}
         run: |
           set -euo pipefail
           missing=""
           [ -n "${SONAR_TOKEN}" ] || missing="${missing} SONAR_TOKEN(secret)"
           [ -n "${SONAR_PROJECT_KEY}" ] || missing="${missing} sonar-project-key(input)"
           if [ -n "${missing}" ]; then
+            if [ "${SONAR_BLOCKING}" != "true" ]; then
+              echo "::notice title=SonarQube is on but not configured::missing:${missing}. sonar-blocking is false, so nothing was analysed and the gate ignores it."
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "::error title=SonarQube is on but not configured::missing:${missing}. Provide them or turn sonar off."
             exit 1
           fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Download test results
+        id: download
+        if: ${{ steps.config.outputs.ready == 'true' }}
+        continue-on-error: ${{ !inputs.sonar-blocking }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: test-results
+          path: ${{ inputs.working-directory }}
 
       - name: SonarQube scan
+        id: scan
+        if: ${{ steps.config.outputs.ready == 'true' }}
+        continue-on-error: ${{ !inputs.sonar-blocking }}
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -345,12 +397,19 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=${{ inputs.sonar-project-key }}
-            -Dsonar.sources=${{ inputs.src-dir }}
-            -Dsonar.tests=${{ inputs.test-dir }}
+            -Dsonar.sources=${{ env.PROJECT_PREFIX }}${{ inputs.src-dir }}
+            -Dsonar.tests=${{ env.PROJECT_PREFIX }}${{ inputs.test-dir }}
             -Dsonar.python.version=${{ inputs.python-version }}
-            -Dsonar.python.coverage.reportPaths=coverage.xml
-            -Dsonar.python.xunit.reportPath=junit.xml
+            -Dsonar.python.coverage.reportPaths=${{ env.PROJECT_PREFIX }}coverage.xml
+            -Dsonar.python.xunit.reportPath=${{ env.PROJECT_PREFIX }}junit.xml
             ${{ inputs.sonar-organization != '' && format('-Dsonar.organization={0}', inputs.sonar-organization) || '' }}
+
+      - name: Report an informative failure
+        if: ${{ always() && !inputs.sonar-blocking && (steps.download.outcome == 'failure' || steps.scan.outcome == 'failure') }}
+        env:
+          DOWNLOAD: ${{ steps.download.outcome }}
+          SCAN: ${{ steps.scan.outcome }}
+        run: echo "::notice title=SonarQube did not complete::download ${DOWNLOAD}, scan ${SCAN}. sonar-blocking is false, so the gate ignores it."
 
   dependencies:
     name: dependencies
@@ -362,6 +421,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -382,7 +444,7 @@ jobs:
           version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
           enable-cache: true
-          cache-dependency-glob: uv.lock
+          cache-dependency-glob: ${{ env.PROJECT_PREFIX }}uv.lock
 
       - name: Install the locked runtime dependencies
         run: |
@@ -516,6 +578,8 @@ jobs:
       - name: Require a branch name the release can classify
         env:
           HEAD_REF: ${{ github.head_ref }}
+          SEMANTIC_BRANCH_CONFIG: ${{ inputs.semantic-branch-config }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -525,7 +589,17 @@ jobs:
           import tomllib
 
           head = os.environ["HEAD_REF"]
-          with open("pyproject.toml", "rb") as handle:
+          config = os.environ["SEMANTIC_BRANCH_CONFIG"] or os.path.join(
+              os.environ["WORKING_DIRECTORY"], "pyproject.toml"
+          )
+          if not os.path.isfile(config):
+              print(
+                  f"::error title=Branch rules not found::'{config}' does not exist. Pass "
+                  f"semantic-branch-config, relative to the repository root, or add "
+                  f"[tool.semantic_branch] to the pyproject.toml in working-directory."
+              )
+              sys.exit(1)
+          with open(config, "rb") as handle:
               rules = tomllib.load(handle).get("tool", {}).get("semantic_branch", {})
           classes = ("major", "minor", "patch", "release_ignore")
           for name in classes:
@@ -535,7 +609,7 @@ jobs:
           patterns = ", ".join(p for name in classes for p in rules.get(name, ())) or "none declared"
           print(
               f"::error title=Unclassified branch::'{head}' matches no class in "
-              f"[tool.semantic_branch], so a release would refuse it. Rename the branch "
+              f"[tool.semantic_branch] of '{config}', so a release would refuse it. Rename the branch "
               f"(accepted: {patterns})."
           )
           sys.exit(1)

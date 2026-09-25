@@ -1,0 +1,44 @@
+[project]
+name = "example-api"
+version = "0.1.0"
+description = "Python service of the monorepo example: its own pyproject.toml and uv.lock"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+strict = true
+
+[tool.semantic_branch]
+patch = [
+    "hotfix/.*",
+    "fix/.*",
+]
+minor = [
+    "feature/.*",
+    "feat/.*",
+]
+major = [
+    "breaking/.*",
+]
+release_ignore = [
+    "docs/.*",
+    "chore/.*",
+    "dependabot/.*",
+]
