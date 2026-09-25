@@ -16,6 +16,7 @@ from typing import Final, NoReturn
 _RELEASE_TAG_GLOB = "v[0-9]*.[0-9]*.[0-9]*"
 _RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 _PARTS: Final[tuple[str, ...]] = ("major", "minor", "patch")
+_DEFAULT_CONFIG: Final[Path] = Path("pyproject.toml")
 
 CommitPullRequests = Callable[[str], tuple[str, ...]]
 
@@ -65,9 +66,24 @@ def _run(command: Sequence[str]) -> str:
     return completed.stdout
 
 
-def branch_rules(repository: Path) -> Mapping[str, tuple[str, ...]]:
-    """Return the branch patterns of every class declared in pyproject.toml."""
-    data = tomllib.loads((repository / "pyproject.toml").read_text(encoding="utf-8"))
+def branch_rules(repository: Path, config: Path = _DEFAULT_CONFIG) -> Mapping[str, tuple[str, ...]]:
+    """Return the branch patterns of every class declared in *config*.
+
+    Args:
+        repository: Checkout the release is planned in.
+        config:     TOML file holding ``[tool.semantic_branch]``, relative to
+            *repository* unless absolute.
+
+    Raises:
+        ReleasePlanError: When *config* does not exist.
+    """
+    path = repository / config
+    if not path.is_file():
+        raise ReleasePlanError(
+            f"semantic branch config '{config}' not found in {repository}: "
+            "pass the file that declares [tool.semantic_branch]"
+        )
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
     section = data.get("tool", {}).get("semantic_branch", {})
     return {
         key: tuple(section.get(key, ())) for key in ("major", "minor", "patch", "release_ignore")
@@ -197,6 +213,8 @@ def plan_release(
     repository: Path,
     merge_sha: str,
     commit_pull_requests: CommitPullRequests,
+    *,
+    config: Path = _DEFAULT_CONFIG,
 ) -> ReleasePlan:
     """Return the release *merge_sha* ships, from the branches merged since the last tag.
 
@@ -210,13 +228,16 @@ def plan_release(
         repository:           Checkout to read tags and commits from.
         merge_sha:            Commit the release is cut from.
         commit_pull_requests: Reader of the head refs a commit came from.
+        config:               TOML file holding the branch rules, relative to
+            *repository* unless absolute.
 
     Returns:
         The planned release.
 
     Raises:
-        ReleasePlanError: When the range is empty, a commit has no pull request,
-            a branch is unclassified, or nothing in the range ships a version.
+        ReleasePlanError: When the range is empty, *config* does not exist, a
+            commit has no pull request, a branch is unclassified, or nothing in
+            the range ships a version.
     """
     last_tag = latest_release_tag(repository, merge_sha)
     commits = shipped_commits(repository, last_tag, merge_sha)
@@ -225,7 +246,7 @@ def plan_release(
             f"nothing to release: no commits since {last_tag or 'the start of history'}"
         )
 
-    rules = branch_rules(repository)
+    rules = branch_rules(repository, config)
     shipped: list[ShippedPullRequest] = []
     for sha in commits:
         head_refs = commit_pull_requests(sha)
@@ -253,6 +274,12 @@ def _parse_args(arguments: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--merge-sha", required=True)
     parser.add_argument("--slug", required=True, help="owner/repo the pull requests live in")
     parser.add_argument(
+        "--semantic-branch-config",
+        default=str(_DEFAULT_CONFIG),
+        help="TOML file declaring [tool.semantic_branch], relative to --repository; "
+        "empty means pyproject.toml",
+    )
+    parser.add_argument(
         "--format",
         choices=("text", "github"),
         default="text",
@@ -270,7 +297,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
     options = _parse_args(arguments)
     try:
         plan = plan_release(
-            options.repository, options.merge_sha, gh_commit_pull_requests(options.slug)
+            options.repository,
+            options.merge_sha,
+            gh_commit_pull_requests(options.slug),
+            config=Path(options.semantic_branch_config or _DEFAULT_CONFIG),
         )
     except ReleasePlanError as error:
         _fail(str(error))

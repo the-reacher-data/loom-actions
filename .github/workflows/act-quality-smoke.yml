@@ -26,3 +26,35 @@ jobs:
 
       - name: Show summary JSON
         run: cat "${{ steps.quality.outputs.summary-file }}"
+
+      - name: Require the default report paths to be unchanged
+        env:
+          REPORT_FILE: ${{ steps.quality.outputs.report-file }}
+          SUMMARY_FILE: ${{ steps.quality.outputs.summary-file }}
+        run: |
+          set -euo pipefail
+          test "${REPORT_FILE}" = "quality_report.md"
+          test "${SUMMARY_FILE}" = "quality_summary.json"
+
+      - name: Run quality action on the fixture project from its own directory
+        uses: ./actions/python/quality-report
+        id: quality-subdirectory
+        with:
+          working-directory: examples/sample_project
+          src-dir: src
+          test-dir: tests
+          coverage-threshold: "70"
+          fail-on-quality: "none"
+          fail-on-security: "none"
+          include-security: "true"
+
+      - name: Require the subdirectory report to be read from the workspace root
+        env:
+          REPORT_FILE: ${{ steps.quality-subdirectory.outputs.report-file }}
+          SUMMARY_FILE: ${{ steps.quality-subdirectory.outputs.summary-file }}
+        run: |
+          set -euo pipefail
+          test "${REPORT_FILE}" = "examples/sample_project/quality_report.md"
+          test "${SUMMARY_FILE}" = "examples/sample_project/quality_summary.json"
+          cat "${REPORT_FILE}"
+          python3 -c 'import json, sys; tests = json.load(open(sys.argv[1]))["summary"]["tests_total"]; sys.exit(0 if tests > 0 else "no tests ran in the subdirectory")' "${SUMMARY_FILE}"

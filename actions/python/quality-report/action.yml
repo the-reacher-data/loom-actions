@@ -34,14 +34,22 @@ inputs:
       case pytest runs here exactly as before.
     required: false
     default: ""
+  working-directory:
+    description: >
+      Directory of the project to check, relative to the workspace. Every check and the
+      report run there, so src-dir, test-dir and test-results-dir are relative to it,
+      and uv.lock is looked for in it. The report paths this action returns are
+      relative to the workspace. Defaults to the workspace itself.
+    required: false
+    default: "."
 
 outputs:
   report-file:
     description: "Generated markdown report"
-    value: ${{ steps.build.outputs.report_file }}
+    value: ${{ steps.build.outputs.path_prefix }}${{ steps.build.outputs.report_file }}
   summary-file:
     description: "Generated JSON summary"
-    value: ${{ steps.build.outputs.summary_file }}
+    value: ${{ steps.build.outputs.path_prefix }}${{ steps.build.outputs.summary_file }}
   blocking:
     description: "Whether gates are blocking"
     value: ${{ steps.build.outputs.blocking }}
@@ -49,15 +57,16 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: "3.11"
 
-    - uses: astral-sh/setup-uv@v3
+    - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
 
     - name: Run quality checks
       id: checks
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       env:
         TEST_RESULTS_DIR: ${{ inputs.test-results-dir }}
       run: |
@@ -129,8 +138,20 @@ runs:
     - name: Build markdown report
       id: build
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
+
+        # The report is written in the working directory, and a caller reads it
+        # from the workspace root, so its paths carry the directory. Written
+        # before the builder runs, because a blocking report exits non-zero.
+        PATH_PREFIX=""
+        if [ -n "${WORKING_DIRECTORY%/}" ] && [ "${WORKING_DIRECTORY%/}" != "." ]; then
+          PATH_PREFIX="${WORKING_DIRECTORY%/}/"
+        fi
+        echo "path_prefix=${PATH_PREFIX}" >> "$GITHUB_OUTPUT"
 
         FROZEN=""
         if [ -f uv.lock ]; then

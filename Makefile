@@ -12,7 +12,7 @@ check-act:
 	@command -v act >/dev/null 2>&1 || (echo "act is not installed" && exit 1)
 
 test-unit:
-	uv run --with pytest --with jinja2 pytest -q tests/unit
+	uv run --with pytest --with jinja2 --with pyyaml --with tomli-w pytest -q tests/unit
 
 test-builder-render:
 	@TMP_DIR=$$(mktemp -d); \
