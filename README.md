@@ -127,8 +127,15 @@ own. `tests/fixtures/callers/` holds a complete example (`ci.yml`, `docs.yml`, `
 that the unit tests check against every workflow it calls: each input and secret it passes is
 declared, each required input is passed, and each job is granted what the called jobs request.
 
-None of them sets `concurrency`; the caller does. No job that runs a command of the caller's
-receives a secret or a write permission.
+None of them sets `concurrency`; the caller does. What reaches the caller's own code:
+
+- `pages` (the build command) and the `extra-check` job of `repo-security`: a read-only token
+  and no secret.
+- `node-ci`: every job only reads; `CODECOV_TOKEN` is passed only to the Codecov upload and the
+  step that checks it is set, both after the tests have run.
+- `image-release`: the job holds `packages: write` and `id-token: write` to push and attest,
+  and runs only the caller's Dockerfile, whose `RUN` steps execute inside BuildKit without the
+  job's token or secrets.
 
 ### node-ci
 
