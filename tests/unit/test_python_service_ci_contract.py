@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 from typing import Any, cast
 
@@ -148,3 +152,229 @@ class TestGate:
     def test_the_comment_is_skipped_for_a_fork(self) -> None:
         comment = next(s for s in _steps("report") if "pr-comment-update" in str(s.get("uses")))
         assert "SAME_REPOSITORY == 'true'" in cast(str, comment["if"])
+
+
+QUALITY_REPORT = (
+    "the-reacher-data/loom-actions/actions/python/quality-report"
+    "@be54dfb371c9390deaca1c7787d9de261ae17255"
+)
+PROJECT_PREFIX = "${{ env.PROJECT_PREFIX }}"
+WORKING_DIRECTORY = "${{ inputs.working-directory }}"
+JOBS = ["lint", "test", "report", "sonar", "dependencies", "image", "branch", "gate"]
+PROJECT_JOBS = {"lint", "test", "dependencies"}
+
+
+def _step(job: str, predicate: str) -> dict[str, Any]:
+    return next(s for s in _steps(job) if predicate in str(s.get("uses", "")) + str(s.get("id")))
+
+
+def _run_python_heredoc(
+    script: str, env: dict[str, str], cwd: Path
+) -> subprocess.CompletedProcess[str]:
+    match = re.search(r"<<'PY'\n(.*?)\n\s*PY\s*$", script, re.DOTALL)
+    assert match is not None, "the step runs no Python heredoc"
+    return subprocess.run(
+        (sys.executable, "-c", textwrap.dedent(match.group(1))),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=cwd,
+        env={**os.environ, **env},
+    )
+
+
+def _run_bash(script: str, env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ("bash", "-c", script),
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=cwd,
+        env={**os.environ, **env},
+    )
+
+
+class TestDefaultsAreUnchanged:
+    """With every new input left alone, the caller gets the jobs and paths it had."""
+
+    @pytest.mark.parametrize(
+        ("name", "kind", "default"),
+        [
+            ("working-directory", "string", "."),
+            ("semantic-branch-config", "string", ""),
+            ("sonar-blocking", "boolean", True),
+        ],
+    )
+    def test_the_new_inputs_are_optional(self, name: str, kind: str, default: object) -> None:
+        declared = _call()["inputs"][name]
+        assert declared["type"] == kind
+        assert declared["default"] == default
+        assert declared["required"] is False
+
+    def test_the_jobs_are_the_same(self) -> None:
+        assert list(_jobs()) == JOBS
+        assert _jobs()["gate"]["needs"] == JOBS[:-1]
+
+    def test_the_default_working_directory_adds_no_prefix(self) -> None:
+        assert _workflow()["env"]["PROJECT_PREFIX"] == (
+            "${{ inputs.working-directory != '.' && inputs.working-directory != '' "
+            "&& format('{0}/', inputs.working-directory) || '' }}"
+        )
+
+
+class TestMonorepo:
+    """A project in ``working-directory`` is checked there, and read from the root."""
+
+    @pytest.mark.parametrize("job", sorted(PROJECT_JOBS))
+    def test_uv_runs_in_the_working_directory(self, job: str) -> None:
+        assert _jobs()[job]["defaults"]["run"]["working-directory"] == WORKING_DIRECTORY
+
+    @pytest.mark.parametrize("job", ["report", "sonar", "image", "branch"])
+    def test_root_jobs_stay_at_the_root(self, job: str) -> None:
+        assert "defaults" not in _jobs()[job]
+
+    def test_the_uv_cache_keys_on_the_project_lockfile(self) -> None:
+        setups = [step for _, step in _all_steps() if "astral-sh/setup-uv" in str(step.get("uses"))]
+        assert setups
+        assert all(s["with"]["cache-dependency-glob"] == f"{PROJECT_PREFIX}uv.lock" for s in setups)
+
+    def test_test_results_are_uploaded_from_the_project(self) -> None:
+        upload = _step("test", "upload-artifact")
+        paths = cast(str, upload["with"]["path"]).splitlines()
+        assert paths == [
+            f"{PROJECT_PREFIX}{name}" for name in ("junit.xml", "coverage.xml", "coverage.json")
+        ]
+
+    @pytest.mark.parametrize("job", ["report", "sonar"])
+    def test_test_results_are_downloaded_into_the_project(self, job: str) -> None:
+        download = _step(job, "download-artifact")
+        assert download["with"]["path"] == WORKING_DIRECTORY
+
+    def test_the_quality_report_is_the_monorepo_release(self) -> None:
+        quality = _step("report", "quality")
+        assert quality["uses"] == QUALITY_REPORT
+        assert quality["with"]["working-directory"] == WORKING_DIRECTORY
+        assert quality["with"]["src-dir"] == "${{ inputs.src-dir }}"
+        assert quality["with"]["test-dir"] == "${{ inputs.test-dir }}"
+
+    def test_codecov_reads_the_project_reports(self) -> None:
+        codecov = [s for s in _steps("report") if "codecov" in str(s.get("uses", "")).lower()]
+        files = sorted(cast(str, s["with"]["files"]) for s in codecov)
+        assert files == [f"./{PROJECT_PREFIX}coverage.xml", f"./{PROJECT_PREFIX}junit.xml"]
+        for step in codecov:
+            name = cast(str, step["with"]["files"]).rsplit("}}", 1)[1]
+            assert f"hashFiles(format('{{0}}{name}', env.PROJECT_PREFIX))" in cast(str, step["if"])
+
+    def test_sonar_scans_from_the_root_with_prefixed_paths(self) -> None:
+        args = cast(str, _step("sonar", "sonarqube-scan-action")["with"]["args"])
+        assert f"-Dsonar.sources={PROJECT_PREFIX}${{{{ inputs.src-dir }}}}" in args
+        assert f"-Dsonar.tests={PROJECT_PREFIX}${{{{ inputs.test-dir }}}}" in args
+        assert f"-Dsonar.python.coverage.reportPaths={PROJECT_PREFIX}coverage.xml" in args
+        assert f"-Dsonar.python.xunit.reportPath={PROJECT_PREFIX}junit.xml" in args
+
+
+class TestBranchRules:
+    """The ``branch`` job reads ``[tool.semantic_branch]`` from the file it is given."""
+
+    RULES = '[tool.semantic_branch]\nminor = ["feature/.*"]\npatch = ["fix/.*"]\n'
+
+    def _check(self, tmp_path: Path, head: str, config: str) -> subprocess.CompletedProcess[str]:
+        step = next(s for s in _steps("branch") if "HEAD_REF" in s.get("env", {}))
+        assert step["env"]["SEMANTIC_BRANCH_CONFIG"] == "${{ inputs.semantic-branch-config }}"
+        assert step["env"]["WORKING_DIRECTORY"] == WORKING_DIRECTORY
+        return _run_python_heredoc(
+            cast(str, step["run"]),
+            {
+                "HEAD_REF": head,
+                "SEMANTIC_BRANCH_CONFIG": config,
+                "WORKING_DIRECTORY": "apps/api",
+            },
+            tmp_path,
+        )
+
+    def test_without_a_config_it_reads_the_project_pyproject(self, tmp_path: Path) -> None:
+        (tmp_path / "apps" / "api").mkdir(parents=True)
+        (tmp_path / "apps" / "api" / "pyproject.toml").write_text(self.RULES, encoding="utf-8")
+        completed = self._check(tmp_path, "feature/x", "")
+        assert completed.returncode == 0, completed.stdout
+        assert "'feature/x' is a minor branch" in completed.stdout
+
+    def test_a_config_is_read_from_the_root(self, tmp_path: Path) -> None:
+        (tmp_path / "pyproject.toml").write_text('[tool.semantic_branch]\nmajor = ["x/.*"]\n')
+        (tmp_path / "rules").mkdir()
+        (tmp_path / "rules" / "branches.toml").write_text(self.RULES, encoding="utf-8")
+        completed = self._check(tmp_path, "fix/y", "rules/branches.toml")
+        assert completed.returncode == 0, completed.stdout
+        assert "'fix/y' is a patch branch" in completed.stdout
+
+    def test_an_unclassified_branch_fails(self, tmp_path: Path) -> None:
+        (tmp_path / "rules.toml").write_text(self.RULES, encoding="utf-8")
+        completed = self._check(tmp_path, "misc/z", "rules.toml")
+        assert completed.returncode == 1
+        assert "::error title=Unclassified branch::" in completed.stdout
+
+    def test_a_missing_config_fails_with_a_clear_error(self, tmp_path: Path) -> None:
+        completed = self._check(tmp_path, "feature/x", "apps/api/pyproject.toml")
+        assert completed.returncode == 1
+        assert "::error title=Branch rules not found::" in completed.stdout
+        assert "Traceback" not in completed.stderr
+
+
+class TestSonarBlocking:
+    """``sonar-blocking: false`` turns every Sonar failure into a notice."""
+
+    def _guard(self) -> dict[str, Any]:
+        return next(
+            s for s in _steps("sonar") if s.get("name") == "Require the SonarQube configuration"
+        )
+
+    @pytest.mark.parametrize("predicate", ["download-artifact", "sonarqube-scan-action"])
+    def test_a_failing_step_is_tolerated_only_when_informative(self, predicate: str) -> None:
+        assert _step("sonar", predicate)["continue-on-error"] == "${{ !inputs.sonar-blocking }}"
+
+    def test_the_scan_is_skipped_without_its_configuration(self) -> None:
+        guard = self._guard()
+        assert guard["id"] == "config"
+        assert guard["env"]["SONAR_BLOCKING"] == "${{ inputs.sonar-blocking }}"
+        for predicate in ("download-artifact", "sonarqube-scan-action"):
+            assert "steps.config.outputs.ready == 'true'" in _step("sonar", predicate)["if"]
+
+    def test_a_tolerated_failure_leaves_a_notice(self) -> None:
+        notice = next(
+            s for s in _steps("sonar") if s.get("name") == "Report an informative failure"
+        )
+        condition = cast(str, notice["if"])
+        assert "!inputs.sonar-blocking" in condition
+        assert "steps.download.outcome == 'failure'" in condition
+        assert "steps.scan.outcome == 'failure'" in condition
+        assert "::notice" in cast(str, notice["run"])
+
+    @pytest.mark.parametrize(
+        ("blocking", "token", "returncode", "ready"),
+        [
+            ("true", "", 1, None),
+            ("false", "", 0, "false"),
+            ("true", "t", 0, "true"),
+            ("false", "t", 0, "true"),
+        ],
+    )
+    def test_the_guard(
+        self, tmp_path: Path, blocking: str, token: str, returncode: int, ready: str | None
+    ) -> None:
+        outputs = tmp_path / "outputs.txt"
+        outputs.touch()
+        completed = _run_bash(
+            cast(str, self._guard()["run"]),
+            {
+                "SONAR_TOKEN": token,
+                "SONAR_PROJECT_KEY": "key",
+                "SONAR_BLOCKING": blocking,
+                "GITHUB_OUTPUT": str(outputs),
+            },
+            tmp_path,
+        )
+        assert completed.returncode == returncode, completed.stdout
+        written = outputs.read_text(encoding="utf-8").splitlines()
+        assert written == ([] if ready is None else [f"ready={ready}"])
+        if ready == "false":
+            assert "::notice title=SonarQube is on but not configured::" in completed.stdout
