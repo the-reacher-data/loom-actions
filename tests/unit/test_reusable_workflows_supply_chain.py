@@ -8,6 +8,7 @@ permissions it uses.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any, cast
@@ -98,3 +99,14 @@ def test_every_gate_waits_for_every_other_job(name: str) -> None:
     script = cast(str, gate["steps"][0]["run"])
     assert '"failure"' in script
     assert '"cancelled"' in script
+
+
+CALLER_CODE = re.compile(r"\b(npm|npx)\b|bash -euo pipefail -c ")
+
+
+@pytest.mark.parametrize("name", REUSABLES)
+def test_no_job_that_runs_the_callers_code_sees_a_secret(name: str) -> None:
+    for job_name, job in _jobs(name).items():
+        runs = " ".join(str(step.get("run", "")) for step in job.get("steps", []))
+        if CALLER_CODE.search(runs):
+            assert "secrets." not in json.dumps(job), job_name

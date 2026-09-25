@@ -243,17 +243,53 @@ jobs:
           mv "${lcov}.prefixed" "${lcov}"
           grep -c '^SF:' "${lcov}" | xargs -I{} echo "{} source files in ${lcov}"
 
+      # A fixed name at the artifact root, so the codecov job finds it whatever
+      # coverage-file is.
+      - name: Stage the coverage report
+        if: ${{ inputs.coverage-file != '' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/coverage"
+          cp "${WORKSPACE_DIR}/${COVERAGE_FILE}" "${RUNNER_TEMP}/coverage/lcov.info"
+
       - name: Store the coverage report
-        if: ${{ inputs.coverage-file != '' && !cancelled() }}
+        if: ${{ inputs.coverage-file != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-${{ matrix.workspace.flag || 'root' }}
-          path: ${{ matrix.workspace.dir }}/${{ inputs.coverage-file }}
-          if-no-files-found: warn
+          path: ${{ runner.temp }}/coverage/lcov.info
+          if-no-files-found: error
           retention-days: 7
 
+  # Its own job, so the Codecov token never shares a runner with the caller's
+  # scripts or its installed dependencies: it only downloads the stored report.
+  codecov:
+    name: codecov (${{ matrix.workspace.flag || 'root' }})
+    needs: [workspaces, test]
+    if: ${{ inputs.codecov && inputs.coverage-file != '' && !cancelled() && needs.test.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: ${{ fromJSON(needs.workspaces.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A workspace whose tests failed stored no report; its gate is already red.
+      - name: Download the coverage report
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-${{ matrix.workspace.flag || 'root' }}
+          path: ${{ runner.temp }}/coverage
+
       - name: Check the Codecov token
-        if: ${{ inputs.codecov }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         run: |
@@ -263,10 +299,10 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        if: ${{ inputs.codecov && inputs.coverage-file != '' && !cancelled() }}
+        if: ${{ steps.download.outcome == 'success' }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
-          files: ${{ matrix.workspace.dir }}/${{ inputs.coverage-file }}
+          files: ${{ runner.temp }}/coverage/lcov.info
           flags: ${{ matrix.workspace.flag }}
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -352,7 +388,7 @@ jobs:
 
   gate:
     name: gate
-    needs: [workspaces, lint, test, build, e2e]
+    needs: [workspaces, lint, test, codecov, build, e2e]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -52,21 +52,31 @@ class TestJobs:
             if name != "gate":
                 assert job["permissions"] == {"contents": "read"}, name
 
-    def test_the_codecov_token_reaches_only_the_upload_and_its_check(self) -> None:
-        holders = [
-            (name, step.get("name") or step.get("uses", ""))
-            for name in wf.jobs(NAME)
-            for step in wf.steps(NAME, name)
-            if "secrets.CODECOV_TOKEN" in json.dumps(step)
-        ]
-        assert [job for job, _ in holders] == ["test", "test"]
-        check, upload = (title for _, title in holders)
-        assert check == "Check the Codecov token"
-        assert upload == "Upload coverage to Codecov"
+    def test_the_codecov_token_reaches_only_the_codecov_job(self) -> None:
+        holders = {name for name, job in wf.jobs(NAME).items() if "secrets." in json.dumps(job)}
+        assert holders == {"codecov"}
+
+    def test_the_codecov_job_runs_nothing_of_the_callers(self) -> None:
+        job = wf.jobs(NAME)["codecov"]
+        assert job["needs"] == ["workspaces", "test"]
+        assert job["strategy"] == wf.jobs(NAME)["test"]["strategy"]
+        for step in wf.steps(NAME, "codecov"):
+            uses = step.get("uses", "")
+            assert "setup-node" not in uses
+            assert not re.search(r"\b(npm|npx|node)\b", cast(str, step.get("run", "")))
+
+    def test_the_codecov_job_uploads_the_stored_report(self) -> None:
+        steps = wf.steps(NAME, "codecov")
+        download = next(s for s in steps if "download-artifact" in s.get("uses", ""))
+        store = wf.step(NAME, "test", "Store the coverage report")
+        assert download["with"]["name"] == store["with"]["name"]
+        upload = next(s for s in steps if "codecov-action" in s.get("uses", ""))
+        assert upload["if"] == "${{ steps.download.outcome == 'success' }}"
 
     def test_the_codecov_upload_is_opt_in_and_never_blocks(self) -> None:
-        upload = next(s for s in wf.steps(NAME, "test") if "codecov" in s.get("uses", ""))
-        assert "inputs.codecov" in upload["if"]
+        job = wf.jobs(NAME)["codecov"]
+        assert "inputs.codecov" in job["if"]
+        upload = next(s for s in wf.steps(NAME, "codecov") if "codecov" in s.get("uses", ""))
         assert upload["with"]["fail_ci_if_error"] is False
         assert upload["with"]["flags"] == "${{ matrix.workspace.flag }}"
         assert upload["with"]["disable_search"] is True
