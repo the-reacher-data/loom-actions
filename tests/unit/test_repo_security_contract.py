@@ -167,9 +167,21 @@ class TestGitleaksScan:
 
     TOKEN = "ghp_" + (string.ascii_letters + string.digits)[7:43]
 
-    def _scan(self, repo: Path, config: str = "") -> subprocess.CompletedProcess[str]:
+    def _scan(
+        self, repo: Path, config: str = "", event: str = "push"
+    ) -> subprocess.CompletedProcess[str]:
         env = dict(wf.step(NAME, "gitleaks", SCAN)["env"])
-        env.update({"GITLEAKS_CONFIG": config, "GITHUB_WORKSPACE": str(repo)})
+        runner_temp = repo.parent / "runner-temp"
+        runner_temp.mkdir(exist_ok=True)
+        env.update(
+            {
+                "GITLEAKS_CONFIG": config,
+                "GITHUB_WORKSPACE": str(repo),
+                "GITHUB_EVENT_NAME": event,
+                "GITHUB_BASE_REF": "master",
+                "RUNNER_TEMP": str(runner_temp),
+            }
+        )
         return wf.run(NAME, "gitleaks", SCAN, env, repo)
 
     def test_a_committed_secret_fails(self, tmp_path: Path) -> None:
@@ -207,3 +219,93 @@ class TestGitleaksScan:
     def test_a_clean_history_passes(self, tmp_path: Path) -> None:
         done = self._scan(_repository(tmp_path, "DEBUG = False\n"))
         assert done.returncode == 0, done.stdout + done.stderr
+
+
+ALLOW_SETTINGS = "[extend]\nuseDefault = true\n\n[allowlist]\npaths = ['''settings\\.py''']\n"
+
+
+def _pull_request(tmp_path: Path, base: dict[str, str], head: dict[str, str]) -> Path:
+    """A base commit on master (origin/master) and a head commit on top of it."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "master")
+    for files, message in ((base, "base"), (head, "head")):
+        for name, content in files.items():
+            (repo / name).write_text(content, encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(
+            repo,
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            message,
+        )
+        if message == "base":
+            _git(repo, "update-ref", "refs/remotes/origin/master", "HEAD")
+    return repo
+
+
+@pytest.mark.skipif(not _docker_ready(), reason="docker is not available")
+class TestGitleaksOnPullRequests:
+    """A pull request cannot clear its own finding by editing the gitleaks settings."""
+
+    TOKEN = TestGitleaksScan.TOKEN
+    SECRET = {"settings.py": f'TOKEN = "{TOKEN}"\n'}
+
+    def _scan(self, repo: Path, config: str = "") -> subprocess.CompletedProcess[str]:
+        return TestGitleaksScan()._scan(repo, config, event="pull_request")
+
+    def test_a_secret_the_head_adds_fails(self, tmp_path: Path) -> None:
+        done = self._scan(_pull_request(tmp_path, {"README": "x"}, self.SECRET))
+        assert done.returncode != 0, done.stdout + done.stderr
+
+    def test_an_allowlist_the_head_adds_is_ignored(self, tmp_path: Path) -> None:
+        head = {**self.SECRET, ".gitleaks.toml": ALLOW_SETTINGS}
+        done = self._scan(_pull_request(tmp_path, {"README": "x"}, head))
+        assert done.returncode != 0, done.stdout + done.stderr
+
+    def test_an_allowlist_at_the_configured_path_the_head_adds_is_ignored(
+        self, tmp_path: Path
+    ) -> None:
+        head = {**self.SECRET, "scan.toml": ALLOW_SETTINGS}
+        done = self._scan(_pull_request(tmp_path, {"README": "x"}, head), "scan.toml")
+        assert done.returncode != 0, done.stdout + done.stderr
+
+    def test_an_ignore_file_the_head_adds_is_ignored(self, tmp_path: Path) -> None:
+        repo = _pull_request(tmp_path, {"README": "x"}, self.SECRET)
+        head = subprocess.run(
+            ("git", "-C", str(repo), "rev-parse", "HEAD"),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        (repo / ".gitleaksignore").write_text(f"{head}:settings.py:github-pat:1\n", "utf-8")
+        _git(repo, "add", "-A")
+        _git(
+            repo,
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-qm",
+            "ignore",
+        )
+        done = self._scan(repo)
+        assert done.returncode != 0, done.stdout + done.stderr
+
+    def test_the_base_allowlist_applies(self, tmp_path: Path) -> None:
+        repo = _pull_request(tmp_path, {".gitleaks.toml": ALLOW_SETTINGS}, self.SECRET)
+        done = self._scan(repo)
+        assert done.returncode == 0, done.stdout + done.stderr
+
+    def test_a_missing_base_branch_fails(self, tmp_path: Path) -> None:
+        repo = _pull_request(tmp_path, {"README": "x"}, {"README": "y"})
+        _git(repo, "update-ref", "-d", "refs/remotes/origin/master")
+        done = self._scan(repo)
+        assert done.returncode != 0
+        assert "::error title=No base branch" in done.stdout

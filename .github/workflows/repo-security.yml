@@ -65,21 +65,51 @@ jobs:
       # for organisations; run through docker so the image's safe.directory
       # applies to a workspace the runner user owns. It runs from the repository,
       # so a committed .gitleaksignore and any relative path resolve there.
+      #
+      # On a pull request the head may edit its own allowlist, so the
+      # configuration and .gitleaksignore come from the base branch instead;
+      # without one there, the default rules apply.
       - name: Scan the full history with gitleaks
         env:
           GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
           GITLEAKS_CONFIG: ${{ inputs.gitleaks-config }}
         run: |
           set -euo pipefail
+          settings="${RUNNER_TEMP}/gitleaks-settings"
+          rm -rf "${settings}"
+          mkdir -p "${settings}"
           args=(git /repo --redact --no-banner --verbose --exit-code 1)
-          if [ -n "${GITLEAKS_CONFIG}" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            base="refs/remotes/origin/${GITHUB_BASE_REF}"
+            if ! git rev-parse --verify --quiet "${base}" > /dev/null; then
+              echo "::error title=No base branch::Could not read ${base} to take the gitleaks settings from."
+              exit 1
+            fi
+            config="${GITLEAKS_CONFIG:-.gitleaks.toml}"
+            if git cat-file -e "${base}:${config}" 2> /dev/null; then
+              git show "${base}:${config}" > "${settings}/config.toml"
+              echo "gitleaks configuration: ${config} from ${GITHUB_BASE_REF}"
+            else
+              printf '[extend]\nuseDefault = true\n' > "${settings}/config.toml"
+              echo "gitleaks configuration: default rules (${config} is not on ${GITHUB_BASE_REF})"
+            fi
+            if git cat-file -e "${base}:.gitleaksignore" 2> /dev/null; then
+              git show "${base}:.gitleaksignore" > "${settings}/.gitleaksignore"
+            else
+              : > "${settings}/.gitleaksignore"
+            fi
+            # gitleaks also reads a .gitleaksignore at the scanned root.
+            rm -f "${GITHUB_WORKSPACE}/.gitleaksignore"
+            args+=(--config /settings/config.toml --gitleaks-ignore-path /settings/.gitleaksignore)
+          elif [ -n "${GITLEAKS_CONFIG}" ]; then
             if [ ! -f "${GITHUB_WORKSPACE}/${GITLEAKS_CONFIG}" ]; then
               echo "::error title=gitleaks configuration is missing::${GITLEAKS_CONFIG} does not exist in the repository."
               exit 1
             fi
             args+=(--config "/repo/${GITLEAKS_CONFIG}")
           fi
-          if ! docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo "${GITLEAKS_IMAGE}" "${args[@]}"; then
+          if ! docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -v "${settings}:/settings:ro" -w /repo \
+            "${GITLEAKS_IMAGE}" "${args[@]}"; then
             echo "::error title=gitleaks found secrets::Read the step log (values are redacted). Rotate every secret found: removing it from the history does not revoke it."
             exit 1
           fi
