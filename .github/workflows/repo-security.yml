@@ -63,7 +63,8 @@ jobs:
 
       # The CLI in its image rather than gitleaks-action, which needs a licence
       # for organisations; run through docker so the image's safe.directory
-      # applies to a workspace the runner user owns.
+      # applies to a workspace the runner user owns. It runs from the repository,
+      # so a committed .gitleaksignore and any relative path resolve there.
       - name: Scan the full history with gitleaks
         env:
           GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
@@ -78,7 +79,7 @@ jobs:
             fi
             args+=(--config "/repo/${GITLEAKS_CONFIG}")
           fi
-          if ! docker run --rm -v "${GITHUB_WORKSPACE}:/repo" "${GITLEAKS_IMAGE}" "${args[@]}"; then
+          if ! docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo "${GITLEAKS_IMAGE}" "${args[@]}"; then
             echo "::error title=gitleaks found secrets::Read the step log (values are redacted). Rotate every secret found: removing it from the history does not revoke it."
             exit 1
           fi

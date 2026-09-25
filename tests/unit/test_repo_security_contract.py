@@ -165,16 +165,44 @@ def _repository(tmp_path: Path, content: str) -> Path:
 class TestGitleaksScan:
     """Runs the scan step itself; the fake token is built at run time, never committed."""
 
-    def _scan(self, repo: Path) -> subprocess.CompletedProcess[str]:
+    TOKEN = "ghp_" + (string.ascii_letters + string.digits)[7:43]
+
+    def _scan(self, repo: Path, config: str = "") -> subprocess.CompletedProcess[str]:
         env = dict(wf.step(NAME, "gitleaks", SCAN)["env"])
-        env.update({"GITLEAKS_CONFIG": "", "GITHUB_WORKSPACE": str(repo)})
+        env.update({"GITLEAKS_CONFIG": config, "GITHUB_WORKSPACE": str(repo)})
         return wf.run(NAME, "gitleaks", SCAN, env, repo)
 
     def test_a_committed_secret_fails(self, tmp_path: Path) -> None:
-        token = "ghp_" + (string.ascii_letters + string.digits)[7:43]
-        done = self._scan(_repository(tmp_path, f'TOKEN = "{token}"\n'))
+        done = self._scan(_repository(tmp_path, f'TOKEN = "{self.TOKEN}"\n'))
         assert done.returncode != 0, done.stdout + done.stderr
-        assert token not in done.stdout + done.stderr
+        assert "::error title=gitleaks found secrets" in done.stdout
+        assert self.TOKEN not in done.stdout + done.stderr
+
+    def test_the_configuration_given_is_used(self, tmp_path: Path) -> None:
+        repo = _repository(tmp_path, f'TOKEN = "{self.TOKEN}"\n')
+        (repo / "scan.toml").write_text(
+            "[extend]\nuseDefault = true\n\n[allowlist]\npaths = ['''settings\\.py''']\n",
+            encoding="utf-8",
+        )
+        done = self._scan(repo, "scan.toml")
+        assert done.returncode == 0, done.stdout + done.stderr
+
+    def test_a_missing_configuration_fails(self, tmp_path: Path) -> None:
+        done = self._scan(_repository(tmp_path, "DEBUG = False\n"), "missing.toml")
+        assert done.returncode != 0
+        assert "::error title=gitleaks configuration is missing" in done.stdout
+
+    def test_a_committed_ignore_file_is_honoured(self, tmp_path: Path) -> None:
+        repo = _repository(tmp_path, f'TOKEN = "{self.TOKEN}"\n')
+        head = subprocess.run(
+            ("git", "-C", str(repo), "rev-parse", "HEAD"),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        (repo / ".gitleaksignore").write_text(f"{head}:settings.py:github-pat:1\n", "utf-8")
+        done = self._scan(repo)
+        assert done.returncode == 0, done.stdout + done.stderr
 
     def test_a_clean_history_passes(self, tmp_path: Path) -> None:
         done = self._scan(_repository(tmp_path, "DEBUG = False\n"))
