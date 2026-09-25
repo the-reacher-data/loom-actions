@@ -1,0 +1,203 @@
+name: image-release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version, X.Y.Z; its tag vX.Y.Z is what gets built"
+        required: true
+        type: string
+      ghcr-image:
+        description: "GHCR image name without a tag, e.g. ghcr.io/owner/app (lowercase)"
+        required: true
+        type: string
+      dockerhub-image:
+        description: "Docker Hub image name without a tag, e.g. owner/app; empty publishes to GHCR only"
+        required: false
+        type: string
+        default: ""
+      platforms:
+        description: "Comma-separated platforms to build"
+        required: false
+        type: string
+        default: "linux/amd64"
+      image-context:
+        description: "Docker build context"
+        required: false
+        type: string
+        default: "."
+      dockerfile:
+        description: "Dockerfile path, relative to the repository root"
+        required: false
+        type: string
+        default: "Dockerfile"
+    secrets:
+      DOCKERHUB_USERNAME:
+        description: "Docker Hub user, required with dockerhub-image"
+        required: false
+      DOCKERHUB_TOKEN:
+        description: "Docker Hub access token with write scope, required with dockerhub-image"
+        required: false
+    outputs:
+      digest:
+        description: "Digest of the published image index"
+        value: ${{ jobs.image.outputs.digest }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  image:
+    name: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      # First, so a run started without a release (an unlabelled merge, a
+      # failed plan) publishes nothing.
+      - name: Require a release version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+          GHCR_IMAGE: ${{ inputs.ghcr-image }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=Not a release version::'${VERSION}' is not X.Y.Z; nothing was built or pushed."
+            exit 1
+          fi
+          if [[ ! "${GHCR_IMAGE}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]]; then
+            echo "::error title=Not a GHCR image name::'${GHCR_IMAGE}' must be ghcr.io/owner/name in lowercase, without a tag."
+            exit 1
+          fi
+          {
+            echo "version=${VERSION}"
+            echo "minor=${VERSION%.*}"
+            echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Require the Docker Hub credentials
+        env:
+          DOCKERHUB_IMAGE: ${{ inputs.dockerhub-image }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKERHUB_IMAGE}" ]; then
+            exit 0
+          fi
+          missing=""
+          [ -n "${DOCKERHUB_USERNAME}" ] || missing="${missing} DOCKERHUB_USERNAME(secret)"
+          [ -n "${DOCKERHUB_TOKEN}" ] || missing="${missing} DOCKERHUB_TOKEN(secret)"
+          if [ -n "${missing}" ]; then
+            echo "::error title=Docker Hub is on but not configured::missing:${missing}. Provide them or leave dockerhub-image empty."
+            exit 1
+          fi
+
+      # The tag, not the commit that started the run: a release resumed by
+      # dispatch runs on the branch head, and the tag is what was released.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/v${{ inputs.version }}
+          persist-credentials: false
+
+      - name: Record the released commit
+        id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: ${{ inputs.dockerhub-image != '' }}
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: |
+            ${{ inputs.ghcr-image }}
+            ${{ inputs.dockerhub-image }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=${{ steps.version.outputs.minor }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.sha }}
+            org.opencontainers.image.created=${{ steps.version.outputs.created }}
+
+      - name: Build and push the image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ inputs.image-context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          push: true
+          pull: true
+          sbom: true
+          provenance: mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            REVISION=${{ steps.revision.outputs.sha }}
+            CREATED=${{ steps.version.outputs.created }}
+          cache-from: type=gha,scope=image
+
+      - name: Skip the attestation in a private repository
+        if: ${{ github.event.repository.private }}
+        run: echo "::notice title=Attestation skipped::Artifact attestations for a private repository need GitHub Enterprise Cloud; the image carries its BuildKit provenance and SBOM only."
+
+      # create-storage-record would need artifact-metadata: write and an
+      # organisation-owned repository; the attestation itself does not.
+      - name: Attest the GHCR image
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ inputs.ghcr-image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest the Docker Hub image
+        if: ${{ inputs.dockerhub-image != '' && !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ startsWith(inputs.dockerhub-image, 'docker.io/') && inputs.dockerhub-image || format('docker.io/{0}', inputs.dockerhub-image) }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Publish the release to the job summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Image ${DIGEST}"
+            echo '```'
+            echo "${TAGS}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
