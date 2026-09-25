@@ -16,6 +16,7 @@ import workflow_steps as wf
 
 NAME = "pages"
 UPLOAD = "actions/upload-pages-artifact"
+DEFAULT_REF = "format('refs/heads/{0}', github.event.repository.default_branch)"
 
 
 class TestInputs:
@@ -25,7 +26,7 @@ class TestInputs:
 
     @pytest.mark.parametrize(
         ("name", "default"),
-        [("deploy", False), ("python-version", ""), ("node-version", "")],
+        [("deploy", False), ("python-version", ""), ("node-version", ""), ("fetch-depth", 1)],
     )
     def test_optional_inputs_keep_their_defaults(self, name: str, default: object) -> None:
         declared = wf.call(NAME)["inputs"][name]
@@ -49,10 +50,29 @@ class TestItOnlyBuilds:
     def test_nothing_is_deployed_here(self) -> None:
         assert "deploy-pages" not in json.dumps(wf.load(NAME))
 
-    def test_the_artifact_is_uploaded_only_on_request_in_public(self) -> None:
+    def test_the_artifact_is_uploaded_only_on_request_in_public_from_the_default_branch(
+        self,
+    ) -> None:
         upload = next(s for s in wf.steps(NAME, "build") if UPLOAD in s.get("uses", ""))
-        assert upload["if"] == "${{ inputs.deploy && !github.event.repository.private }}"
+        assert upload["if"] == (
+            "${{ inputs.deploy && !github.event.repository.private"
+            f" && github.ref == {DEFAULT_REF} }}}}"
+        )
         assert upload["with"]["path"] == "${{ inputs.output-dir }}"
+
+    def test_a_deploy_request_off_the_default_branch_gets_a_notice(self) -> None:
+        notice = wf.step(NAME, "build", "Skip the Pages artifact off the default branch")
+        assert notice["if"] == f"${{{{ inputs.deploy && github.ref != {DEFAULT_REF} }}}}"
+        assert "::notice" in notice["run"]
+
+    def test_a_deploying_build_restores_no_cache(self) -> None:
+        setup = next(s for s in wf.steps(NAME, "build") if "setup-uv" in s.get("uses", ""))
+        assert setup["with"]["enable-cache"] == "${{ !inputs.deploy }}"
+
+    def test_the_checkout_depth_is_the_callers(self) -> None:
+        checkout = next(s for s in wf.steps(NAME, "build") if "checkout" in s.get("uses", ""))
+        assert checkout["with"]["fetch-depth"] == "${{ inputs.fetch-depth }}"
+        assert wf.call(NAME)["inputs"]["fetch-depth"]["type"] == "number"
 
     def test_a_private_deploy_request_gets_a_notice(self) -> None:
         notice = wf.step(NAME, "build", "Skip the Pages artifact in a private repository")
