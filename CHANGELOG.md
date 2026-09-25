@@ -1,3 +1,60 @@
+# 🚀 Release 1.5.0 ([#40](https://github.com/the-reacher-data/loom-actions/pull/40)) ([`fa9f387`](https://github.com/the-reacher-data/loom-actions/commit/fa9f387931df4c8d046bb4a556e8d40fa698c65f))
+
+
+## ✨ Features
+### python-service-ci
+- **python-service-ci:** support a monorepo project and an informative Sonar<br>
+  > A monorepo keeps its Python service in a subdirectory with its own
+  > pyproject.toml and uv.lock, and the workflow only ran from the root.
+  > working-directory, "." by default: lint, test and dependencies run uv
+  > there, src-dir and test-dir are relative to it, the test results are
+  > uploaded from it and downloaded back into it, and quality-report gets it.
+  > quality-report is pinned to be54dfb (the merge of #37, whose actions/ tree
+  > is the one released as v1.4.0), the first commit with working-directory.
+  > Sonar, Codecov, the image and the branch check stay at the root; Sonar and
+  > Codecov read the project's reports through a PROJECT_PREFIX that is empty
+  > by default, so every path is exactly the one used before.
+  > semantic-branch-config, empty by default: the branch check reads its rules
+  > from that file, relative to the root, or else from the pyproject.toml in
+  > working-directory. A missing file is a clear error instead of a traceback.
+  > sonar-blocking, true by default: when false, a Sonar that fails or is on
+  > without its token or project key leaves a notice and the gate ignores it.
+  > The jobs and the gate are unchanged, and the contract tests pin both.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+
+
+## 📖 Documentation
+### readme
+- **readme:** document the monorepo inputs and sonar-blocking of python-service-ci<br>
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+
+
+
+
+## ✅ Tests
+### examples
+- **examples:** run python-service-ci over a monorepo example under act<br>
+  > examples/monorepo keeps a Python service in apps/api with its own
+  > pyproject.toml, [tool.semantic_branch] and uv.lock, and a Dockerfile built
+  > from the monorepo root. Its caller passes working-directory,
+  > semantic-branch-config, image-context and dockerfile, so quality-report runs
+  > with --frozen in a subdirectory, which the composite smoke did not cover.
+  > make act-monorepo runs it. act's artifact server only speaks the protocol of
+  > upload-artifact and download-artifact v4, so tests/act/run-monorepo.sh runs a
+  > throwaway copy of the checkout with those two pins swapped for v4 and fails
+  > if the pins it swaps are gone. The root .gitignore ignores uv.lock, so the
+  > example's lockfile is unignored.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+
+
+
+
 # 🚀 Release 1.4.0 ([#16](https://github.com/the-reacher-data/loom-actions/pull/16)) ([`1dcfe63`](https://github.com/the-reacher-data/loom-actions/commit/1dcfe63cf91e6c9a38b389cda3674e9f176e607d))
 
 
