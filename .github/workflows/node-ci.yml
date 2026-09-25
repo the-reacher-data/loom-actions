@@ -1,0 +1,407 @@
+name: node-ci
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node.js version the project runs on"
+        required: true
+        type: string
+      workspaces:
+        description: "Space-separated npm workspace names; empty runs the scripts in the root project"
+        required: false
+        type: string
+        default: ""
+      lint-script:
+        description: "npm script that lints; it must exist in every workspace, empty skips it"
+        required: false
+        type: string
+        default: "lint"
+      typecheck-script:
+        description: "npm script that type-checks; it must exist in every workspace, empty skips it"
+        required: false
+        type: string
+        default: "typecheck"
+      test-script:
+        description: "npm script that runs the tests with coverage; it must exist in every workspace"
+        required: false
+        type: string
+        default: "test:coverage"
+      coverage-file:
+        description: "lcov report the test script writes, relative to each workspace; empty skips coverage"
+        required: false
+        type: string
+        default: "coverage/lcov.info"
+      build-script:
+        description: "npm script that builds, run where it exists; empty skips the build"
+        required: false
+        type: string
+        default: "build"
+      e2e-command:
+        description: "Shell command that runs the end-to-end tests from the repository root; empty skips them"
+        required: false
+        type: string
+        default: ""
+      e2e-workspace-dir:
+        description: "Directory whose locked Playwright installs Chromium for the end-to-end tests"
+        required: false
+        type: string
+        default: "."
+      codecov:
+        description: "Upload each workspace's coverage to Codecov, flagged with its directory name"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CODECOV_TOKEN:
+        description: "Codecov upload token; public repositories can upload without it"
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  workspaces:
+    name: workspaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the workspaces
+        id: resolve
+        env:
+          WORKSPACES: ${{ inputs.workspaces }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import PurePosixPath
+
+          try:
+              with open("package-lock.json", encoding="utf-8") as handle:
+                  packages = json.load(handle).get("packages", {})
+          except FileNotFoundError:
+              print(
+                  "::error title=package-lock.json is missing::Commit package-lock.json "
+                  "('npm install'): CI installs exactly that resolution with npm ci."
+              )
+              sys.exit(1)
+
+          names = os.environ["WORKSPACES"].split()
+          matrix = [] if names else [{"name": "", "dir": ".", "flag": ""}]
+          for name in names:
+              link = packages.get(f"node_modules/{name}", {})
+              if not link.get("link"):
+                  known = sorted(
+                      key.removeprefix("node_modules/")
+                      for key, entry in packages.items()
+                      if key.startswith("node_modules/") and entry.get("link")
+                  )
+                  print(
+                      f"::error title=Unknown workspace::'{name}' is not a workspace in "
+                      f"package-lock.json (workspaces: {', '.join(known) or 'none'})."
+                  )
+                  sys.exit(1)
+              directory = str(link["resolved"])
+              matrix.append({"name": name, "dir": directory, "flag": PurePosixPath(directory).name})
+
+          flags = [entry["flag"] for entry in matrix]
+          if len(set(flags)) != len(flags):
+              print(
+                  "::error title=Ambiguous coverage flags::Two workspaces share a directory "
+                  f"name ({', '.join(flags)}), so their Codecov flags would collide."
+              )
+              sys.exit(1)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={json.dumps(matrix, separators=(',', ':'))}\n")
+          print(json.dumps(matrix, indent=2))
+          PY
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      WORKSPACES: ${{ inputs.workspaces }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install the locked dependencies
+        run: npm ci
+
+      - name: Lint
+        if: ${{ inputs.lint-script != '' }}
+        env:
+          LINT_SCRIPT: ${{ inputs.lint-script }}
+        run: |
+          set -euo pipefail
+          read -ra names <<< "${WORKSPACES}"
+          args=()
+          for name in "${names[@]}"; do args+=(--workspace "${name}"); done
+          npm run "${LINT_SCRIPT}" "${args[@]}"
+
+      - name: Type-check
+        if: ${{ !cancelled() && inputs.typecheck-script != '' }}
+        env:
+          TYPECHECK_SCRIPT: ${{ inputs.typecheck-script }}
+        run: |
+          set -euo pipefail
+          read -ra names <<< "${WORKSPACES}"
+          args=()
+          for name in "${names[@]}"; do args+=(--workspace "${name}"); done
+          npm run "${TYPECHECK_SCRIPT}" "${args[@]}"
+
+  test:
+    name: test (${{ matrix.workspace.flag || 'root' }})
+    needs: workspaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: ${{ fromJSON(needs.workspaces.outputs.matrix) }}
+    env:
+      WORKSPACE_NAME: ${{ matrix.workspace.name }}
+      WORKSPACE_DIR: ${{ matrix.workspace.dir }}
+      COVERAGE_FILE: ${{ inputs.coverage-file }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install the locked dependencies
+        run: npm ci
+
+      - name: Run the tests with coverage
+        env:
+          TEST_SCRIPT: ${{ inputs.test-script }}
+        run: |
+          set -euo pipefail
+          if [ -n "${WORKSPACE_NAME}" ]; then
+            npm run "${TEST_SCRIPT}" --workspace "${WORKSPACE_NAME}"
+          else
+            npm run "${TEST_SCRIPT}"
+          fi
+
+      # The test runner writes lcov paths relative to the workspace, or absolute
+      # on the runner; Codecov and any reader of the repository need them
+      # relative to its root.
+      - name: Prefix the lcov paths with the workspace directory
+        if: ${{ inputs.coverage-file != '' }}
+        run: |
+          set -euo pipefail
+          lcov="${WORKSPACE_DIR}/${COVERAGE_FILE}"
+          if [ ! -f "${lcov}" ]; then
+            echo "::error title=No coverage report::${lcov} was not written. Make the test script write lcov there, or set coverage-file."
+            exit 1
+          fi
+          prefix=""
+          if [ "${WORKSPACE_DIR}" != "." ]; then
+            prefix="${WORKSPACE_DIR%/}/"
+          fi
+          awk -v prefix="${prefix}" -v root="${GITHUB_WORKSPACE%/}/" '
+            /^SF:/ {
+              path = substr($0, 4)
+              sub(/^\.\//, "", path)
+              if (index(path, root) == 1) {
+                path = substr(path, length(root) + 1)
+              } else if (substr(path, 1, 1) != "/") {
+                path = prefix path
+              }
+              print "SF:" path
+              next
+            }
+            { print }
+          ' "${lcov}" > "${lcov}.prefixed"
+          mv "${lcov}.prefixed" "${lcov}"
+          grep -c '^SF:' "${lcov}" | xargs -I{} echo "{} source files in ${lcov}"
+
+      # A fixed name at the artifact root, so the codecov job finds it whatever
+      # coverage-file is.
+      - name: Stage the coverage report
+        if: ${{ inputs.coverage-file != '' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/coverage"
+          cp "${WORKSPACE_DIR}/${COVERAGE_FILE}" "${RUNNER_TEMP}/coverage/lcov.info"
+
+      - name: Store the coverage report
+        if: ${{ inputs.coverage-file != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-${{ matrix.workspace.flag || 'root' }}
+          path: ${{ runner.temp }}/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  # Its own job, so the Codecov token never shares a runner with the caller's
+  # scripts or its installed dependencies: it only downloads the stored report.
+  codecov:
+    name: codecov (${{ matrix.workspace.flag || 'root' }})
+    needs: [workspaces, test]
+    if: ${{ inputs.codecov && inputs.coverage-file != '' && !cancelled() && needs.test.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: ${{ fromJSON(needs.workspaces.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A workspace whose tests failed stored no report; its gate is already red.
+      - name: Download the coverage report
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-${{ matrix.workspace.flag || 'root' }}
+          path: ${{ runner.temp }}/coverage
+
+      - name: Check the Codecov token
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CODECOV_TOKEN}" ]; then
+            echo "::warning title=Codecov has no token::codecov is on but CODECOV_TOKEN was not passed. A public repository uploads without it; a private one uploads nothing."
+          fi
+
+      - name: Upload coverage to Codecov
+        if: ${{ steps.download.outcome == 'success' }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ${{ runner.temp }}/coverage/lcov.info
+          flags: ${{ matrix.workspace.flag }}
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  build:
+    name: build
+    if: ${{ inputs.build-script != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install the locked dependencies
+        run: npm ci
+
+      # A library workspace may have nothing to build, so the script runs where
+      # it exists; lint, type-check and test scripts must exist everywhere.
+      - name: Build
+        env:
+          WORKSPACES: ${{ inputs.workspaces }}
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+        run: |
+          set -euo pipefail
+          read -ra names <<< "${WORKSPACES}"
+          args=()
+          for name in "${names[@]}"; do args+=(--workspace "${name}"); done
+          npm run --if-present "${BUILD_SCRIPT}" "${args[@]}"
+
+  e2e:
+    name: e2e
+    if: ${{ inputs.e2e-command != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      E2E_WORKSPACE_DIR: ${{ inputs.e2e-workspace-dir }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install the locked dependencies
+        run: npm ci
+
+      # --no keeps npx on the locked Playwright: the browser build must match it.
+      - name: Install Chromium
+        run: |
+          set -euo pipefail
+          cd "${E2E_WORKSPACE_DIR}"
+          npx --no playwright install --with-deps chromium
+
+      - name: Run the end-to-end command
+        env:
+          E2E_COMMAND: ${{ inputs.e2e-command }}
+        run: bash -euo pipefail -c "${E2E_COMMAND}"
+
+      - name: Store the Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: |
+            ${{ inputs.e2e-workspace-dir }}/playwright-report
+            ${{ inputs.e2e-workspace-dir }}/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  gate:
+    name: gate
+    needs: [workspaces, lint, test, codecov, build, e2e]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every job that ran to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "${NEEDS}"
+          failed=$(jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key] | join(", ")' <<< "${NEEDS}")
+          if [ -n "${failed}" ]; then
+            echo "::error title=CI failed::${failed}"
+            exit 1
+          fi

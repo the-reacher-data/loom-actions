@@ -32,6 +32,10 @@ Reusable GitHub Actions for Python projects using Trunk-Based Development and Co
 |---|---|
 | `.github/workflows/python-service-ci.yml` | CI for a Python service shipped as a container image: lint, tests, quality report, image build/smoke/scan, optional Codecov/SonarQube/Snyk, one `gate` check |
 | `.github/workflows/release-on-label.yml` | Trunk-based release: tag, notes and GitHub Release when a pull request labelled `release` merges; building a distribution is opt-in |
+| `.github/workflows/node-ci.yml` | CI for npm workspaces: lint, type-check, tests with repository-relative lcov per workspace, build, Playwright end-to-end on Chromium, optional Codecov, one `gate` check |
+| `.github/workflows/repo-security.yml` | gitleaks over the full history, CodeQL, dependency review and a command of the caller's with no secret, one `gate` check |
+| `.github/workflows/pages.yml` | Builds a static site with a read-only token and uploads it as the Pages artifact; the caller deploys |
+| `.github/workflows/image-release.yml` | Publishes a release image to GHCR and optionally Docker Hub: multi-arch, `X.Y.Z`/`X.Y`/`latest`, SBOM, provenance and an attestation |
 
 ### python-service-ci
 
@@ -114,6 +118,186 @@ When the Python project lives in a subdirectory, with its own `pyproject.toml` a
   Codecov with `fixes` in its `codecov.yml`.
 - With the defaults every path is the one used before, and the jobs are the same.
 - [`examples/monorepo`](examples/monorepo) is a runnable caller: `make act-monorepo`.
+
+### Monorepo callers
+
+The four workflows below are small and independent, so a monorepo calls each one from its own
+job, grants that job only the permissions the workflow needs, and requires one `gate` of its
+own. `tests/fixtures/callers/` holds a complete example (`ci.yml`, `docs.yml`, `release.yml`)
+that the unit tests check against every workflow it calls: each input and secret it passes is
+declared, each required input is passed, and each job is granted what the called jobs request.
+
+None of them sets `concurrency`; the caller does. What reaches the caller's own code:
+
+- `pages` (the build command) and the `extra-check` job of `repo-security`: a read-only token
+  and no secret.
+- `node-ci`: every job only reads. `CODECOV_TOKEN` reaches only the `codecov` job, which runs
+  no npm and none of the caller's scripts: it downloads the lcov the `test` job stored.
+- `image-release`: the caller's Dockerfile is built in the privileged job, the one holding
+  `packages: write`, `id-token: write` and the Docker Hub secrets. Its `RUN` steps execute
+  inside BuildKit without the job's token or secrets, but whatever the Dockerfile and the
+  tagged commit contain ends up in a signed, attested image, so only a reviewed commit on the
+  default branch may be released (see below).
+
+Command inputs (`build-command`, `extra-check-command`, `e2e-command`) are run as shell code.
+Write them as constants in the caller: never build one from `github.head_ref`, a pull request
+title or body, or any other text a contributor controls.
+
+### node-ci
+
+```yaml
+  node:
+    permissions:
+      contents: read
+    uses: the-reacher-data/loom-actions/.github/workflows/node-ci.yml@<sha> # vX.Y.Z
+    with:
+      node-version: "22"
+      workspaces: "@acme/core acme-web"
+      e2e-command: "npm run test:e2e -w @acme/core"
+      e2e-workspace-dir: packages/core
+      codecov: true
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+```
+
+| Job | Runs | Blocks on |
+|---|---|---|
+| `workspaces` | always | no `package-lock.json`, a name that is not a workspace, two workspaces in directories with the same name |
+| `lint` | always | `npm ci`, `lint-script` and `typecheck-script` in every workspace (a missing script fails) |
+| `test` | once per workspace | `test-script` (a missing script fails), no lcov at `coverage-file` |
+| `codecov` | once per workspace, `codecov: true` | never: the upload is informational |
+| `build` | `build-script` set | `build-script` where it exists |
+| `e2e` | `e2e-command` set | `npx --no playwright install --with-deps chromium` in `e2e-workspace-dir`, then the command |
+| `gate` | always | any job above failed or was cancelled |
+
+- `workspaces` is a space-separated list of npm workspace names, resolved to their directories
+  through `package-lock.json`; empty runs the scripts in the root project.
+- The `SF:` paths of each lcov are rewritten relative to the repository root
+  (`src/a.ts` in `packages/core` becomes `packages/core/src/a.ts`), stored as the artifact
+  `coverage-<dir>` and, with `codecov: true`, uploaded by the `codecov` job with the flag
+  `<dir>`: the basename of the workspace directory (`core`, `web`). The upload never fails the
+  run.
+- Playwright comes from the lockfile: `npx --no` refuses to download another version.
+
+### repo-security
+
+```yaml
+  security:
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+      actions: read
+    uses: the-reacher-data/loom-actions/.github/workflows/repo-security.yml@<sha> # vX.Y.Z
+    with:
+      gitleaks-config: .gitleaks.toml
+      codeql-languages: "python,javascript-typescript"
+      extra-check-command: "python3 scripts/check.py && node scripts/check.mjs"
+      extra-check-python-version: "3.12"
+      extra-check-node-version: "22"
+```
+
+| Job | Runs | Permissions | Blocks on |
+|---|---|---|---|
+| `gitleaks` | always | `contents: read` | a secret anywhere in the history (gitleaks 8.30.1, image pinned by digest; findings are redacted) |
+| `codeql` | `codeql-languages` set | `contents: read`, `security-events: write`, `actions: read` | an analysis that fails; alerts land in code scanning (`build-mode: none`) |
+| `dependency-review` | pull requests, `dependency-review: true` | `contents: read`, `pull-requests: write` | a new dependency vulnerable at `dependency-review-severity` (`high`) |
+| `extra-check` | `extra-check-command` set | `contents: read` | a non-zero exit of the command |
+| `gate` | always | none | any job above failed or was cancelled |
+
+- In a private repository CodeQL and the dependency review need GitHub Advanced Security, so
+  their jobs leave a notice and pass.
+- On a pull request gitleaks reads its configuration (`gitleaks-config`, or `.gitleaks.toml`)
+  and `.gitleaksignore` from the base branch, never from the head, so a pull request cannot
+  allowlist its own finding; without them on the base, the default rules apply. On a push it
+  reads them from the commit scanned.
+- `extra-check-command` runs with `bash -euo pipefail`, no secret and a checkout that keeps no
+  token. `extra-check-python-version` installs uv and a virtualenv of that Python first on
+  `PATH` (outside the workspace); `extra-check-node-version` installs Node.js.
+
+### pages
+
+```yaml
+  docs:
+    permissions:
+      contents: read
+    uses: the-reacher-data/loom-actions/.github/workflows/pages.yml@<sha> # vX.Y.Z
+    with:
+      deploy: true
+      python-version: "3.12"
+      build-command: "uv sync --locked && uv run --locked sphinx-build -W -b html docs docs/_build/html"
+      output-dir: docs/_build/html
+      fetch-depth: 0 # the version is read from the git tags
+
+  deploy:
+    needs: docs
+    if: ${{ needs.docs.outputs.pages-artifact == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+```
+
+- The workflow only builds, with `contents: read` and no secret, and fails when
+  `output-dir/index.html` is missing. It never deploys: `pages: write` and `id-token: write`
+  belong to the caller's deploy job, which runs none of the build's code.
+- `deploy: true` uploads the site as the Pages artifact and sets the output
+  `pages-artifact` to `true`, only on the default branch of a public repository; elsewhere it
+  leaves a notice instead. With `deploy: false` (a pull request) it only builds.
+- A build with `deploy: true` restores no uv cache, so nothing a pull request saved reaches a
+  published site.
+- `fetch-depth` (1 by default) is passed to the checkout; 0 brings the tags a version read from
+  git needs.
+
+### image-release
+
+```yaml
+  image:
+    needs: release
+    if: ${{ needs.release.result == 'success' && needs.release.outputs.version != '' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: the-reacher-data/loom-actions/.github/workflows/image-release.yml@<sha> # vX.Y.Z
+    with:
+      version: ${{ needs.release.outputs.version }}
+      expected-sha: ${{ github.event.pull_request.merge_commit_sha || inputs.merge_sha }}
+      ghcr-image: ghcr.io/acme/app
+      dockerhub-image: acme/app
+      platforms: "linux/amd64,linux/arm64"
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+- It stops before anything else unless `version` matches `^[0-9]+\.[0-9]+\.[0-9]+$` and
+  `ghcr-image` is a lowercase `ghcr.io/...` name, and when `dockerhub-image` is set without
+  both Docker Hub secrets.
+- It builds the tag `v<version>`, not the commit that started the run, and refuses it unless
+  the tagged commit is on the default branch and, when `expected-sha` is passed, is exactly
+  that commit.
+- It pushes `X.Y.Z` and `X.Y` to GHCR and, optionally, Docker Hub, and `latest` only when
+  `v<version>` is the highest `vX.Y.Z` tag, so a patch to an older line leaves `latest` alone.
+  The build args are `VERSION`, `REVISION` (the tagged commit) and `CREATED`, with an SBOM and
+  `provenance: mode=max`.
+- It reads no layer cache: the `gha` cache pull requests write is never trusted by a signed
+  release. The binfmt and BuildKit images are pinned by digest; QEMU is set up only for a
+  platform other than `linux/amd64`.
+- Protect the `v*` tags with a repository ruleset (restrict creation, update and deletion to
+  the release automation). The ancestry check stops a tag on a side branch, not one moved to
+  another commit of the default branch; `expected-sha` covers that for the caller that passes it.
+- In a public repository the digest gets a build provenance attestation pushed to the
+  registry (`gh attestation verify oci://ghcr.io/acme/app:X.Y.Z --repo <owner>/<repo>
+  --signer-repo the-reacher-data/loom-actions`); in a private one, a notice. No storage record
+  is created, so `artifact-metadata: write` is not needed.
 
 ## Quality Budgets
 

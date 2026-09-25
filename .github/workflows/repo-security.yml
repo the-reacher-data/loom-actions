@@ -1,0 +1,217 @@
+name: repo-security
+
+on:
+  workflow_call:
+    inputs:
+      gitleaks-config:
+        description: "gitleaks configuration, relative to the repository root; empty uses .gitleaks.toml when present, else the defaults"
+        required: false
+        type: string
+        default: ""
+      codeql-languages:
+        description: "Comma-separated CodeQL languages analysed without a build; empty skips CodeQL"
+        required: false
+        type: string
+        default: ""
+      dependency-review:
+        description: "Review the dependencies a pull request adds"
+        required: false
+        type: boolean
+        default: true
+      dependency-review-severity:
+        description: "Lowest vulnerability severity a new dependency may not have: low, moderate, high or critical"
+        required: false
+        type: string
+        default: "high"
+      extra-check-command:
+        description: "Shell command run from the repository root with a read-only token and no secret; empty skips it"
+        required: false
+        type: string
+        default: ""
+      extra-check-python-version:
+        description: "Python the extra check runs with, through uv; empty installs none"
+        required: false
+        type: string
+        default: ""
+      extra-check-node-version:
+        description: "Node.js the extra check runs with; empty installs none"
+        required: false
+        type: string
+        default: ""
+      uv-version:
+        description: "uv version, pinned, when extra-check-python-version is set"
+        required: false
+        type: string
+        default: "0.10.2"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The CLI in its image rather than gitleaks-action, which needs a licence
+      # for organisations; run through docker so the image's safe.directory
+      # applies to a workspace the runner user owns. It runs from the repository,
+      # so a committed .gitleaksignore and any relative path resolve there.
+      #
+      # On a pull request the head may edit its own allowlist, so the
+      # configuration and .gitleaksignore come from the base branch instead;
+      # without one there, the default rules apply.
+      - name: Scan the full history with gitleaks
+        env:
+          GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
+          GITLEAKS_CONFIG: ${{ inputs.gitleaks-config }}
+        run: |
+          set -euo pipefail
+          settings="${RUNNER_TEMP}/gitleaks-settings"
+          rm -rf "${settings}"
+          mkdir -p "${settings}"
+          args=(git /repo --redact --no-banner --verbose --exit-code 1)
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            base="refs/remotes/origin/${GITHUB_BASE_REF}"
+            if ! git rev-parse --verify --quiet "${base}" > /dev/null; then
+              echo "::error title=No base branch::Could not read ${base} to take the gitleaks settings from."
+              exit 1
+            fi
+            config="${GITLEAKS_CONFIG:-.gitleaks.toml}"
+            if git cat-file -e "${base}:${config}" 2> /dev/null; then
+              git show "${base}:${config}" > "${settings}/config.toml"
+              echo "gitleaks configuration: ${config} from ${GITHUB_BASE_REF}"
+            else
+              printf '[extend]\nuseDefault = true\n' > "${settings}/config.toml"
+              echo "gitleaks configuration: default rules (${config} is not on ${GITHUB_BASE_REF})"
+            fi
+            if git cat-file -e "${base}:.gitleaksignore" 2> /dev/null; then
+              git show "${base}:.gitleaksignore" > "${settings}/.gitleaksignore"
+            else
+              : > "${settings}/.gitleaksignore"
+            fi
+            # gitleaks also reads a .gitleaksignore at the scanned root.
+            rm -f "${GITHUB_WORKSPACE}/.gitleaksignore"
+            args+=(--config /settings/config.toml --gitleaks-ignore-path /settings/.gitleaksignore)
+          elif [ -n "${GITLEAKS_CONFIG}" ]; then
+            if [ ! -f "${GITHUB_WORKSPACE}/${GITLEAKS_CONFIG}" ]; then
+              echo "::error title=gitleaks configuration is missing::${GITLEAKS_CONFIG} does not exist in the repository."
+              exit 1
+            fi
+            args+=(--config "/repo/${GITLEAKS_CONFIG}")
+          fi
+          if ! docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -v "${settings}:/settings:ro" -w /repo \
+            "${GITLEAKS_IMAGE}" "${args[@]}"; then
+            echo "::error title=gitleaks found secrets::Read the step log (values are redacted). Rotate every secret found: removing it from the history does not revoke it."
+            exit 1
+          fi
+
+  codeql:
+    name: codeql
+    if: ${{ inputs.codeql-languages != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Skip CodeQL in a private repository
+        if: ${{ github.event.repository.private }}
+        run: echo "::notice title=CodeQL skipped::Code scanning needs GitHub Advanced Security in a private repository; nothing was analysed."
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ !github.event.repository.private }}
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        if: ${{ !github.event.repository.private }}
+        with:
+          languages: ${{ inputs.codeql-languages }}
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        if: ${{ !github.event.repository.private }}
+
+  dependency-review:
+    name: dependency-review
+    if: ${{ inputs.dependency-review && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Skip the dependency review in a private repository
+        if: ${{ github.event.repository.private }}
+        run: echo "::notice title=Dependency review skipped::It needs GitHub Advanced Security in a private repository; no dependency was reviewed."
+
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        if: ${{ !github.event.repository.private }}
+        with:
+          fail-on-severity: ${{ inputs.dependency-review-severity }}
+          comment-summary-in-pr: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'on-failure' || 'never' }}
+
+  extra-check:
+    name: extra-check
+    if: ${{ inputs.extra-check-command != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # activate-environment puts a virtualenv of that Python first on PATH, so
+      # python3 in the command is the version asked for, not the runner's; it
+      # lives outside the workspace so a check that walks the tree skips it.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        if: ${{ inputs.extra-check-python-version != '' }}
+        with:
+          version: ${{ inputs.uv-version }}
+          python-version: ${{ inputs.extra-check-python-version }}
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/extra-check-venv
+          enable-cache: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ inputs.extra-check-node-version != '' }}
+        with:
+          node-version: ${{ inputs.extra-check-node-version }}
+          package-manager-cache: false
+
+      - name: Run the extra check
+        env:
+          EXTRA_CHECK_COMMAND: ${{ inputs.extra-check-command }}
+        run: bash -euo pipefail -c "${EXTRA_CHECK_COMMAND}"
+
+  gate:
+    name: gate
+    needs: [gitleaks, codeql, dependency-review, extra-check]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every job that ran to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "${NEEDS}"
+          failed=$(jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key] | join(", ")' <<< "${NEEDS}")
+          if [ -n "${failed}" ]; then
+            echo "::error title=CI failed::${failed}"
+            exit 1
+          fi

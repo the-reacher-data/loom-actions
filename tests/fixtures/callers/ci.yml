@@ -1,0 +1,88 @@
+# A monorepo caller shaped like the one plan §5 describes: a Python API, two
+# npm workspaces and Sphinx docs. The values are placeholders; the keys each
+# job passes and the permissions it grants are what the contract test reads.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  python:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: the-reacher-data/loom-actions/.github/workflows/python-service-ci.yml@0000000000000000000000000000000000000000
+    with:
+      python-version: "3.12"
+      coverage-threshold: 80
+      image-context: .
+      dockerfile: Dockerfile
+      image-scan-severity: high
+      image-smoke-command: "true"
+      codecov: true
+      sonar: ${{ vars.SONAR_ENABLED == 'true' && github.actor != 'dependabot[bot]' }}
+      sonar-organization: acme
+      sonar-project-key: acme_app
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  node:
+    permissions:
+      contents: read
+    uses: the-reacher-data/loom-actions/.github/workflows/node-ci.yml@0000000000000000000000000000000000000000
+    with:
+      node-version: "22"
+      workspaces: "@acme/core acme-web"
+      e2e-command: "npm run test:e2e -w @acme/core"
+      e2e-workspace-dir: packages/core
+      codecov: true
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  security:
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+      actions: read
+    uses: the-reacher-data/loom-actions/.github/workflows/repo-security.yml@0000000000000000000000000000000000000000
+    with:
+      gitleaks-config: .gitleaks.toml
+      codeql-languages: "python,javascript-typescript"
+      dependency-review: true
+      extra-check-command: "python3 scripts/scan.py . && uv run --no-project --with pytest pytest scripts/tests && node scripts/generate.mjs --check"
+      extra-check-python-version: "3.12"
+      extra-check-node-version: "22"
+
+  docs:
+    permissions:
+      contents: read
+    uses: the-reacher-data/loom-actions/.github/workflows/pages.yml@0000000000000000000000000000000000000000
+    with:
+      deploy: false
+      python-version: "3.12"
+      build-command: "cd apps/api && uv sync --locked && uv run --locked sphinx-build -W -b html ../../docs ../../docs/_build/html"
+      output-dir: docs/_build/html
+      fetch-depth: 0
+
+  gate:
+    needs: [python, node, security, docs]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          failed=$(jq -r '[to_entries[] | select(.value.result=="failure" or .value.result=="cancelled") | .key] | join(", ")' <<< "$NEEDS")
+          if [ -n "$failed" ]; then echo "::error title=CI failed::$failed"; exit 1; fi

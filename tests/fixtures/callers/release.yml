@@ -1,0 +1,49 @@
+# The release of plan §5 after review round 3; only the image job calls a
+# workflow added with it.
+name: release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      merge_sha:
+        type: string
+        required: true
+
+concurrency:
+  group: release-${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    uses: the-reacher-data/loom-actions/.github/workflows/release-on-label.yml@0000000000000000000000000000000000000000
+    with:
+      build-distribution: true
+      package-name: acme-api
+      python-version: "3.12"
+
+  image:
+    needs: release
+    if: ${{ needs.release.result == 'success' && needs.release.outputs.version != '' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: the-reacher-data/loom-actions/.github/workflows/image-release.yml@0000000000000000000000000000000000000000
+    with:
+      version: ${{ needs.release.outputs.version }}
+      expected-sha: ${{ github.event.pull_request.merge_commit_sha || inputs.merge_sha }}
+      ghcr-image: ghcr.io/acme/app
+      dockerhub-image: acme/app
+      platforms: "linux/amd64,linux/arm64"
+      dockerfile: Dockerfile
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
