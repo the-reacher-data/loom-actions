@@ -13,3 +13,5 @@ build/
 node_modules/
 .DS_Store
 uv.lock
+# The monorepo example commits its lockfile: CI installs exactly that resolution.
+!examples/monorepo/apps/api/uv.lock

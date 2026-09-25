@@ -1,0 +1,27 @@
+# CI of the monorepo example: a Python service in apps/api, with its own
+# pyproject.toml and uv.lock, and a Dockerfile built from the monorepo root.
+#
+# GitHub only runs the workflows of the repository root, so this one runs
+# locally with `make act-monorepo`, against the python-service-ci.yml of this
+# checkout. A real caller pins it instead:
+#   uses: the-reacher-data/loom-actions/.github/workflows/python-service-ci.yml@<sha> # vX.Y.Z
+name: ci
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  ci:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/python-service-ci.yml
+    with:
+      python-version: "3.12"
+      working-directory: examples/monorepo/apps/api
+      semantic-branch-config: examples/monorepo/apps/api/pyproject.toml
+      image-context: examples/monorepo
+      dockerfile: examples/monorepo/Dockerfile
+      image-smoke-command: python -c "import example_api" && test "$(id -u)" = 10001

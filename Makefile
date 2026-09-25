@@ -1,4 +1,4 @@
-.PHONY: bootstrap test-unit test-builder-render test-all act-unit act-smoke check-act clean
+.PHONY: bootstrap test-unit test-builder-render test-all act-unit act-smoke act-monorepo check-act clean
 
 PYTHON ?= python3
 
@@ -47,6 +47,9 @@ act-unit: check-act
 
 act-smoke: check-act
 	act pull_request -W .github/workflows/act-quality-smoke.yml -e tests/act/events/pull_request.json
+
+act-monorepo: check-act
+	tests/act/run-monorepo.sh
 
 test-all: test-unit test-builder-render
 
