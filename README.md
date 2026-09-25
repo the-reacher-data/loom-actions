@@ -473,6 +473,18 @@ act's artifact server only implements the protocol of `upload-artifact` and
 `download-artifact` v4, so the target runs a throwaway copy of the checkout in which those
 two pins are v4; every other step runs as on GitHub.
 
+`tests/act/run-release.sh <caller checkout> <package-name> [input=value ...]` runs the
+`build` job of `release-on-label` over a throwaway clone of a caller, tagged `v9.9.9`, and
+downloads its distributions as a caller's `publish` job would. The plan and the GitHub
+release need the GitHub API, so the harness stubs the plan and leaves the release out;
+nothing is pushed or published.
+
+```bash
+tests/act/run-release.sh ../loom-py loom-kernel
+tests/act/run-release.sh ../nautilus-ui periplo package-dir=apps/api \
+  semantic-branch-config=apps/api/pyproject.toml check-distribution=true python-version='"3.12"'
+```
+
 ## Repository Workflows
 
 | Workflow | Trigger | Purpose |
