@@ -1,3 +1,151 @@
+# 🚀 Release 1.6.0 ([#42](https://github.com/the-reacher-data/loom-actions/pull/42)) ([`f299351`](https://github.com/the-reacher-data/loom-actions/commit/f299351c56249c774edd991725b6129383ca9561))
+
+
+## ✨ Features
+### workflows
+- **workflows:** add reusable node-ci workflow<br>
+  > CI for npm workspaces, one job per concern and one gate: npm ci from the
+  > lockfile, lint and type-check, tests with coverage once per workspace, build
+  > where the script exists, and Playwright end-to-end tests on a Chromium the
+  > locked Playwright installs. A missing lint, type-check or test script fails
+  > instead of passing unnoticed.
+  > Workspace names resolve to their directories through package-lock.json, so
+  > each lcov is rewritten with SF: paths relative to the repository root and
+  > uploaded to Codecov, opt-in and never blocking, flagged with the directory
+  > name. Every job only reads; the Codecov token reaches the upload alone.
+  > The contract tests run the resolve and lcov steps themselves through a small
+  > helper that executes a workflow's run: script as the runner does.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- **workflows:** add reusable repo-security workflow<br>
+  > gitleaks 8.30.1 over the full history, from its image pinned by digest;
+  > CodeQL without a build for the languages given; dependency review on pull
+  > requests, blocking at high by default; and a command of the caller's, run
+  > with a read-only token, no secret and, on request, a pinned uv with a
+  > virtualenv of the Python asked for and Node.js. One gate requires them all.
+  > In a private repository CodeQL and the dependency review need GitHub
+  > Advanced Security, so their jobs leave a notice and pass. The tests run the
+  > gitleaks step against a throwaway repository holding a token built at run
+  > time, and the extra check's exit code, besides the contract.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- **workflows:** add reusable pages build workflow<br>
+  > Builds a static site with a read-only token and no secret, requires
+  > output-dir/index.html, and with deploy uploads it as the Pages artifact,
+  > reporting that through the pages-artifact output. It never deploys: the
+
+- **workflows:** add reusable image-release workflow<br>
+  > Publishes the image of a release to GHCR and, optionally, Docker Hub. It
+  > stops first unless version is X.Y.Z and the GHCR name is valid, and when
+  > Docker Hub is asked for without both secrets. It builds the release tag, not
+  > the commit that started the run, for every platform given, tags X.Y.Z, X.Y
+  > and latest, passes VERSION, REVISION and CREATED, and pushes an SBOM and
+  > mode=max provenance. In a public repository each pushed digest gets a build
+  > provenance attestation stored in the registry; in a private one, a notice.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+
+## 🐛 Fixes
+### workflows
+- **workflows:** run gitleaks from the repository and test its configuration<br>
+  > The scan now runs with /repo as its working directory, so any path gitleaks
+  > resolves against the current directory lands in the repository rather than
+  > the image root. The tests cover the paths a caller takes beyond the default:
+  > a configuration whose allowlist clears a finding, a configuration that does
+  > not exist, and a committed .gitleaksignore holding the finding's fingerprint.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- **workflows:** upload node-ci coverage from a job that runs no caller code<br>
+  > The test job ran the caller's npm scripts, with dependencies installed, on
+  > the same runner where a later step received CODECOV_TOKEN. The test job now
+  > only stores each workspace's rewritten lcov as an artifact; a codecov job
+  > with the same matrix, a read-only token and no npm, downloads it and
+  > uploads it. A workspace that stored no report skips its upload; its tests
+  > already failed the gate.
+  > A contract test now requires that no job running npm, npx or a command of
+  > the caller's references a secret, in all four new workflows.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- **workflows:** harden what image-release builds and tags<br>
+  > The signed release no longer reads the gha layer cache that pull
+  > requests write (scope=image), so no layer a pull request produced can
+  > reach a published, attested image.
+  > The binfmt and BuildKit images the builder actions start are pinned by
+  > digest, and QEMU is set up only when a platform other than linux/amd64
+  > is asked for.
+  > latest moves only when the version is the highest vX.Y.Z tag, so a patch
+  > to an older line leaves it alone.
+  > The tagged commit must be on the default branch and, with the new
+  > optional expected-sha input, be exactly the commit the caller released.
+  > The scripts are tested against a throwaway repository with tags on and off
+  > the default branch.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- **workflows:** take the gitleaks settings of a pull request from its base<br>
+  > A pull request could clear its own finding: gitleaks read the allowlist in
+  > .gitleaks.toml, or the configured file, and .gitleaksignore from the checked
+  > out head. On pull_request the scan now reads both from the base branch into
+  > a temporary directory, falls back to the default rules and an empty ignore
+  > list when the base has none, removes the head's .gitleaksignore from the
+  > scanned root, and fails when the base branch cannot be read. Pushes still
+  > use the settings of the commit scanned.
+  > The tests reproduce each bypass against the previous step and show it
+
+- **workflows:** upload the Pages site only from the default branch<br>
+  > A caller passing deploy on another branch, or on a pull request, could have
+  > uploaded a site its deploy job would publish. The Pages artifact is now
+  > uploaded only when github.ref is the default branch, with a notice
+  > otherwise, and a build that may be deployed restores no uv cache a pull
+  > request could have saved.
+  > A new fetch-depth input, 1 by default, lets a build that reads its version
+  > from git tags check out the full history.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+
+## 📖 Documentation
+### readme
+- **readme:** document node-ci, repo-security, pages and image-release<br>
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- **readme:** state exactly what reaches the caller's code<br>
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+- **readme:** document the hardened release, pages and gitleaks behaviour<br>
+  > Covers the codecov job, gitleaks settings taken from the base branch, the
+  > default-branch-only Pages upload and fetch-depth, and in image-release the
+  > dropped cache, the pinned builder images, latest for the highest release
+  > only, the ancestry check and expected-sha. It states that the Dockerfile is
+  > built in the privileged job, recommends a ruleset protecting v* tags, and
+  > warns against building command inputs from contributor-controlled text.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+  > --------
+  > Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+
+
+
+
+## ✅ Tests
+### workflows
+- **workflows:** check the new workflows and a monorepo caller<br>
+  > The four new workflows are only callable, pin every action by commit with
+  > its version, interpolate no expression into a script, keep no checkout
+  > token, declare permissions and a timeout per job and leave concurrency to
+  > the caller; only image-release can mint an identity.
+  > The caller fixtures mirror the monorepo CI, docs and release the workflows
+  > are built for. GitHub rejects an undeclared input or secret, and a caller
+  > granting less than the called jobs request, only when a run starts, so the
+  > test checks every call in them for all three.
+  > Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+
+
+
+
+
+
 # 🚀 Release 1.5.0 ([#40](https://github.com/the-reacher-data/loom-actions/pull/40)) ([`fa9f387`](https://github.com/the-reacher-data/loom-actions/commit/fa9f387931df4c8d046bb4a556e8d40fa698c65f))
 
 
