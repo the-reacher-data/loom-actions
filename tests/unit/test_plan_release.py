@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "actions" / "release" / "plan-release" / "src"))
 
+import plan_release as plan_release_module  # noqa: E402
 from plan_release import (  # noqa: E402
     ReleasePlanError,
     classify_branch,
     declares_break,
     highest_part,
+    main,
     next_version,
     plan_release,
 )
@@ -49,9 +52,9 @@ def _repository(tmp_path: Path, rules: str) -> Path:
     return repository
 
 
-def _rules_toml() -> str:
+def _rules_toml(rules: Mapping[str, tuple[str, ...]] = _RULES) -> str:
     lines = ["[tool.semantic_branch]"]
-    for key, patterns in _RULES.items():
+    for key, patterns in rules.items():
         rendered = ", ".join(f'"{pattern}"' for pattern in patterns)
         lines.append(f"{key} = [{rendered}]")
     return "\n".join(lines) + "\n"
@@ -264,3 +267,88 @@ class TestPlanRelease:
 
         assert "version  : 1.11.0" in rendered
         assert "feat/one" in rendered
+
+
+class TestSemanticBranchConfig:
+    def test_default_config_output_is_identical(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repository = _repository(tmp_path, _rules_toml())
+        _git(repository, "tag", "v1.10.0")
+        merge = _commit(repository, "feat: one")
+        monkeypatch.setattr(
+            plan_release_module, "gh_commit_pull_requests", lambda _slug: lambda _sha: ("feat/one",)
+        )
+        base = ["--repository", str(repository), "--merge-sha", merge, "--slug", "o/r"]
+
+        outputs = []
+        variants = (
+            [],
+            ["--semantic-branch-config", "pyproject.toml"],
+            ["--semantic-branch-config", ""],
+        )
+        for extra in variants:
+            for output_format in ("text", "github"):
+                assert main([*base, *extra, "--format", output_format]) == 0
+                outputs.append(capsys.readouterr().out)
+
+        assert outputs[:2] == outputs[2:4] == outputs[4:]
+        assert outputs[1] == '{"version": "1.11.0", "part": "minor"}\n'
+
+    def test_custom_config_path_is_read(self, tmp_path: Path) -> None:
+        repository = _repository(tmp_path, "[project]\nname = 'monorepo'\n")
+        (repository / "apps" / "api").mkdir(parents=True)
+        (repository / "apps" / "api" / "pyproject.toml").write_text(_rules_toml(), encoding="utf-8")
+        _git(repository, "tag", "v1.10.0")
+        merge = _commit(repository, "fix: one")
+
+        plan = plan_release(
+            repository, merge, lambda _sha: ("fix/one",), config=Path("apps/api/pyproject.toml")
+        )
+
+        assert (plan.part, plan.version) == ("patch", "1.10.1")
+        with pytest.raises(ReleasePlanError, match="matches no class"):
+            plan_release(repository, merge, lambda _sha: ("fix/one",))
+
+    def test_missing_config_raises_release_plan_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repository = _repository(tmp_path, _rules_toml())
+        _git(repository, "tag", "v1.10.0")
+        merge = _commit(repository, "fix: one")
+
+        with pytest.raises(ReleasePlanError, match="apps/api/pyproject.toml.*not found"):
+            plan_release(
+                repository, merge, lambda _sha: ("fix/one",), config=Path("apps/api/pyproject.toml")
+            )
+        with pytest.raises(SystemExit) as exited:
+            main(
+                [
+                    "--repository",
+                    str(repository),
+                    "--merge-sha",
+                    merge,
+                    "--slug",
+                    "o/r",
+                    "--semantic-branch-config",
+                    "missing.toml",
+                ]
+            )
+        assert exited.value.code == 1
+        assert "missing.toml" in capsys.readouterr().err
+
+    def test_dependabot_branch_is_release_ignore_when_configured(self, tmp_path: Path) -> None:
+        rules = {**_RULES, "release_ignore": (*_RULES["release_ignore"], "dependabot/.*")}
+        repository = _repository(tmp_path, _rules_toml())
+        (repository / "release.toml").write_text(_rules_toml(rules), encoding="utf-8")
+        _git(repository, "tag", "v1.10.0")
+        bump = _commit(repository, "build(deps): bump a dependency")
+
+        def head_refs(_sha: str) -> tuple[str, ...]:
+            return ("dependabot/pip/uv-0.9.0",)
+
+        assert classify_branch("dependabot/pip/uv-0.9.0", rules) is None
+        with pytest.raises(ReleasePlanError, match="matches no class"):
+            plan_release(repository, bump, head_refs)
+        with pytest.raises(ReleasePlanError, match="ships no version"):
+            plan_release(repository, bump, head_refs, config=Path("release.toml"))

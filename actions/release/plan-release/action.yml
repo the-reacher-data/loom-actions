@@ -15,6 +15,12 @@ inputs:
   github-token:
     description: "Token used to read the pull request of each shipped commit"
     required: true
+  semantic-branch-config:
+    description: >
+      TOML file declaring [tool.semantic_branch], relative to the checkout. A monorepo
+      passes the pyproject.toml of the package it releases.
+    required: false
+    default: "pyproject.toml"
 
 outputs:
   version:
@@ -38,13 +44,16 @@ runs:
         REPOSITORY_SLUG: ${{ inputs.repository-slug }}
         NOTES_OUTPUT: ${{ inputs.notes-output }}
         GH_TOKEN: ${{ inputs.github-token }}
+        SEMANTIC_BRANCH_CONFIG: ${{ inputs.semantic-branch-config }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
         python3 "${ACTION_PATH}/src/plan_release.py" \
-          --merge-sha "${MERGE_SHA}" --slug "${REPOSITORY_SLUG}" | tee plan.txt
+          --merge-sha "${MERGE_SHA}" --slug "${REPOSITORY_SLUG}" \
+          --semantic-branch-config "${SEMANTIC_BRANCH_CONFIG}" | tee plan.txt
         PLAN=$(python3 "${ACTION_PATH}/src/plan_release.py" \
-          --merge-sha "${MERGE_SHA}" --slug "${REPOSITORY_SLUG}" --format github)
+          --merge-sha "${MERGE_SHA}" --slug "${REPOSITORY_SLUG}" \
+          --semantic-branch-config "${SEMANTIC_BRANCH_CONFIG}" --format github)
         VERSION=$(jq -r .version <<< "${PLAN}")
         PART=$(jq -r .part <<< "${PLAN}")
         echo "version=${VERSION}" >> "$GITHUB_OUTPUT"

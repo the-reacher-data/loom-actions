@@ -109,6 +109,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config", required=False, default="pyproject.toml", help="Path to config file"
     )
+    parser.add_argument(
+        "--semantic-branch-config",
+        required=False,
+        default="",
+        help="TOML file declaring [tool.semantic_branch]; empty reads it from --config",
+    )
     return parser.parse_args()
 
 
@@ -117,7 +123,10 @@ def main() -> None:
     try:
         args = parse_args()
         data = load_config(args.config)
-        cfg: SemanticBranchConfig = data.get("tool", {}).get("semantic_branch", {})
+        # The version is always read from and written to --config; only the
+        # branch rules may live in another file, which is never rewritten.
+        rules = load_config(args.semantic_branch_config) if args.semantic_branch_config else data
+        cfg: SemanticBranchConfig = rules.get("tool", {}).get("semantic_branch", {})
         current_version: str = data.get("project", {}).get("version", "0.1.0")
         prerelease: bool = args.prerelease.lower() == "true"
 

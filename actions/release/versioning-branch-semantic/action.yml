@@ -13,6 +13,13 @@ inputs:
     description: "Path to TOML config"
     required: false
     default: "pyproject.toml"
+  semantic-branch-config:
+    description: >
+      TOML file declaring [tool.semantic_branch]. Empty by default, in which case the
+      rules are read from config-file as before. The version is always read from and
+      written to config-file.
+    required: false
+    default: ""
 
 outputs:
   version:
@@ -38,13 +45,15 @@ runs:
         BRANCH: ${{ inputs.branch }}
         PRERELEASE: ${{ inputs.prerelease }}
         CONFIG_FILE: ${{ inputs.config-file }}
+        SEMANTIC_BRANCH_CONFIG: ${{ inputs.semantic-branch-config }}
       run: |
         set -euo pipefail
         result=$(uv run --with-requirements "${{ github.action_path }}/requirements.txt" \
           python "${{ github.action_path }}/src/cli.py" \
           --branch "${BRANCH}" \
           --prerelease "${PRERELEASE}" \
-          --config "${CONFIG_FILE}")
+          --config "${CONFIG_FILE}" \
+          --semantic-branch-config "${SEMANTIC_BRANCH_CONFIG}")
 
         version=$(echo "$result" | awk -F= '/^version=/{print $2}')
         deploy=$(echo "$result" | awk -F= '/^deploy=/{print $2}')
