@@ -1,3 +1,19 @@
+# 🚀 Release 1.4.0 ([#16](https://github.com/the-reacher-data/loom-actions/pull/16)) ([`1dcfe63`](https://github.com/the-reacher-data/loom-actions/commit/1dcfe63cf91e6c9a38b389cda3674e9f176e607d))
+
+
+
+## 🐛 Fixes
+- actions/python/quality-report/requirements.txt to reduce vulnerabilities
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.4.0 ([#37](https://github.com/the-reacher-data/loom-actions/pull/37)) ([`be54dfb`](https://github.com/the-reacher-data/loom-actions/commit/be54dfb371c9390deaca1c7787d9de261ae17255))
 
 
