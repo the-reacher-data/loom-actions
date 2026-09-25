@@ -1,3 +1,48 @@
+# 🚀 Release 1.4.0 ([#37](https://github.com/the-reacher-data/loom-actions/pull/37)) ([`be54dfb`](https://github.com/the-reacher-data/loom-actions/commit/be54dfb371c9390deaca1c7787d9de261ae17255))
+
+
+## ✨ Features
+### quality-report
+- **quality-report:** run the checks in an optional working-directory<br>
+  > A monorepo keeps its Python project in a subdirectory, and the composite only
+  > ran from the workspace root. The new working-directory input, "." by default,
+  > runs every check and the report there, so src-dir, test-dir, test-results-dir
+  > and the uv.lock lookup are relative to it.
+  > The report paths the action returns carry the directory, so a caller still
+  > reads them from the workspace root. The prefix is written before the builder
+  > runs, because a blocking report exits non-zero. With the default it is empty
+  > and the outputs are exactly the paths returned before; the act smoke asserts
+  > both cases.
+
+
+### release
+- **release:** read the branch rules from an optional semantic-branch-config<br>
+  > A monorepo declares [tool.semantic_branch] in the pyproject.toml of the
+  > package it releases, not at the root. plan-release gains a
+  > semantic-branch-config input, pyproject.toml by default, passed to both of its
+  > planner runs so the plan shown and the version returned read the same rules.
+  > A file that does not exist now refuses with a ReleasePlanError naming it,
+  > instead of an uncaught FileNotFoundError. An empty value means the default, so
+  > a reusable workflow can forward its own input unchanged.
+  > versioning-branch-semantic already reads config-file, which holds both the
+  > rules and the version it rewrites. Its semantic-branch-config is empty by
+  > default and then keeps reading the rules from config-file; when set, only the
+  > rules come from it, and the version is still read from and written to
+  > config-file, so a separate rules file is never rewritten.
+  > With the defaults, both produce exactly the output they did. The unit tests
+  > load cli.py, which imports tomli_w, so the test runs install tomli-w.
+
+
+
+
+
+
+
+
+
+
+
+
 # 🚀 Release 1.3.0 ([#35](https://github.com/the-reacher-data/loom-actions/pull/35)) ([`433c52c`](https://github.com/the-reacher-data/loom-actions/commit/433c52cd7e58127c0cb263a924a9f3a2b8d756ad))
 
 
