@@ -121,8 +121,8 @@ jobs:
    caller's file, not `release-on-label.yml`), environment `pypi`.
 2. In the caller repository, create the environment `pypi`. Required reviewers are the way to
    hold an upload for approval. Do not limit its deployment branches to `master`: a run
-   started by a merged pull request has the ref `refs/pull/<n>/merge`, which such a rule
-   refuses.
+   started by a `pull_request` event does not run on the `master` ref, so such a rule would
+   refuse the upload of every labelled merge.
 3. No PyPI token is stored anywhere; the `publish` job only needs `id-token: write`.
    `gh-action-pypi-publish` also uploads PEP 740 attestations for the files it publishes.
 
@@ -158,9 +158,10 @@ gh attestation verify oci://docker.io/<namespace>/<image>:X.Y.Z \
 ```
 
 `--repo` is the caller, whose commit was built; `--signer-repo` is where the signing
-workflow lives. To also pin the workflow itself, add
-`--signer-workflow the-reacher-data/loom-actions/.github/workflows/image-release.yml`.
-`gh` must be logged in (`gh auth login`) to read the attestations.
+workflow lives. To pin the workflow itself, pass
+`--signer-workflow the-reacher-data/loom-actions/.github/workflows/image-release.yml`
+**instead of** `--signer-repo`: `gh` refuses both at once. `gh` must be logged in
+(`gh auth login`) to read the attestations.
 
 A private repository gets a notice instead of an attestation (artifact attestations need
 GitHub Enterprise Cloud there); the image still carries its BuildKit provenance and SBOM.

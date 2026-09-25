@@ -390,7 +390,8 @@ report over the results rather than a second execution of the same suite.
 
 The gate is unchanged: a failed test and coverage below the threshold still block, because
 both are read from these files rather than from the exit code of a pytest this action ran.
-The tool table shows pytest as `reused`; the quality gate gives the verdict.
+The tool table shows pytest as `reused`; the quality gate gives the verdict. (From the release
+after this change; `python-service-ci` picks it up once it pins that release.)
 
 Every input reaches the scripts through the environment, never through an expression in the
 script text.
