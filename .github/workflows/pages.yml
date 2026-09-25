@@ -1,0 +1,96 @@
+name: pages
+
+on:
+  workflow_call:
+    inputs:
+      build-command:
+        description: "Shell command that builds the site from the repository root, with a read-only token and no secret"
+        required: true
+        type: string
+      output-dir:
+        description: "Directory the build writes the site to, relative to the repository root"
+        required: true
+        type: string
+      deploy:
+        description: "Upload the site as the Pages artifact for a deploy job in the caller; this workflow never deploys"
+        required: false
+        type: boolean
+        default: false
+      python-version:
+        description: "Python the build runs with, through uv; empty installs none"
+        required: false
+        type: string
+        default: ""
+      uv-version:
+        description: "uv version, pinned, when python-version is set"
+        required: false
+        type: string
+        default: "0.10.2"
+      node-version:
+        description: "Node.js the build runs with; empty installs none"
+        required: false
+        type: string
+        default: ""
+    outputs:
+      pages-artifact:
+        description: "'true' when the site was uploaded as the Pages artifact"
+        value: ${{ jobs.build.outputs.pages-artifact }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      pages-artifact: ${{ steps.upload.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        if: ${{ inputs.python-version != '' }}
+        with:
+          version: ${{ inputs.uv-version }}
+          python-version: ${{ inputs.python-version }}
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: ${{ inputs.node-version != '' }}
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager-cache: false
+
+      - name: Build the site
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: bash -euo pipefail -c "${BUILD_COMMAND}"
+
+      - name: Require the built site
+        env:
+          OUTPUT_DIR: ${{ inputs.output-dir }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "${OUTPUT_DIR}/index.html" ]; then
+            echo "::error title=No site was built::${OUTPUT_DIR}/index.html does not exist after the build command."
+            exit 1
+          fi
+          echo "## Site: $(find "${OUTPUT_DIR}" -type f | wc -l | tr -d ' ') files in ${OUTPUT_DIR}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Skip the Pages artifact in a private repository
+        if: ${{ inputs.deploy && github.event.repository.private }}
+        run: echo "::notice title=Pages skipped::GitHub Pages is not available to this private repository on every plan; the site was built and not uploaded."
+
+      - name: Upload the Pages artifact
+        id: upload
+        if: ${{ inputs.deploy && !github.event.repository.private }}
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ inputs.output-dir }}
