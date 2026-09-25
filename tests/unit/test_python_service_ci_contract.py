@@ -156,7 +156,7 @@ class TestGate:
 
 QUALITY_REPORT = (
     "the-reacher-data/loom-actions/actions/python/quality-report"
-    "@be54dfb371c9390deaca1c7787d9de261ae17255"
+    "@90b0ee6af678dfecf92c18a87e2a5f8081644309"
 )
 PROJECT_PREFIX = "${{ env.PROJECT_PREFIX }}"
 WORKING_DIRECTORY = "${{ inputs.working-directory }}"
