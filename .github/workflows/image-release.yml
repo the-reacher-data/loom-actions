@@ -31,6 +31,11 @@ on:
         required: false
         type: string
         default: "Dockerfile"
+      expected-sha:
+        description: "Commit the release tag must point at, e.g. the merge commit the release planned; empty skips the check"
+        required: false
+        type: string
+        default: ""
     secrets:
       DOCKERHUB_USERNAME:
         description: "Docker Hub user, required with dockerhub-image"
@@ -67,6 +72,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           GHCR_IMAGE: ${{ inputs.ghcr-image }}
+          PLATFORMS: ${{ inputs.platforms }}
         run: |
           set -euo pipefail
           if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -77,10 +83,19 @@ jobs:
             echo "::error title=Not a GHCR image name::'${GHCR_IMAGE}' must be ghcr.io/owner/name in lowercase, without a tag."
             exit 1
           fi
+          qemu=false
+          IFS=',' read -ra requested <<< "${PLATFORMS}"
+          for platform in "${requested[@]}"; do
+            platform="${platform//[[:space:]]/}"
+            if [ -n "${platform}" ] && [ "${platform}" != "linux/amd64" ]; then
+              qemu=true
+            fi
+          done
           {
             echo "version=${VERSION}"
             echo "minor=${VERSION%.*}"
             echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "qemu=${qemu}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Require the Docker Hub credentials
@@ -102,19 +117,65 @@ jobs:
           fi
 
       # The tag, not the commit that started the run: a release resumed by
-      # dispatch runs on the branch head, and the tag is what was released.
+      # dispatch runs on the branch head, and the tag is what was released. The
+      # full fetch brings every tag and branch for the two checks below.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/v${{ inputs.version }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Record the released commit
+      # A tag can be pushed by anyone with write access; this refuses one that
+      # points at a commit the default branch never received, or at another
+      # commit than the one the caller released.
+      - name: Require the release commit on the default branch
         id: revision
-        run: echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if [ -n "${EXPECTED_SHA}" ] && [ "${head}" != "${EXPECTED_SHA}" ]; then
+            echo "::error title=Unexpected release commit::The tag points at ${head}, not at expected-sha ${EXPECTED_SHA}."
+            exit 1
+          fi
+          if [ -z "${DEFAULT_BRANCH}" ] || ! git rev-parse --verify --quiet "refs/remotes/origin/${DEFAULT_BRANCH}" > /dev/null; then
+            echo "::error title=No default branch::Could not read the default branch '${DEFAULT_BRANCH}' to check the release commit against."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${head}" "refs/remotes/origin/${DEFAULT_BRANCH}"; then
+            echo "::error title=Release commit is not on ${DEFAULT_BRANCH}::The tag points at ${head}, which ${DEFAULT_BRANCH} does not contain; nothing was built or pushed."
+            exit 1
+          fi
+          echo "sha=${head}" >> "${GITHUB_OUTPUT}"
 
+      # latest names the highest release, so a patch to an older line keeps it
+      # where it is.
+      - name: Decide whether latest moves
+        id: latest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          highest=$(git tag --list 'v*' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)
+          if [ "${highest}" = "v${VERSION}" ]; then
+            echo "latest=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "latest=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice title=latest stays::v${VERSION} is not the highest release (${highest}); latest is not moved."
+          fi
+
+      # The emulator and builder images are the actions' defaults, pinned by the
+      # digest those tags resolved to on 2026-09-25.
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        if: ${{ steps.version.outputs.qemu == 'true' }}
+        with:
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0 # latest, 2026-09-25
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          driver-opts: image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8 # buildx-stable-1, 2026-09-25
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -140,7 +201,7 @@ jobs:
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
             type=raw,value=${{ steps.version.outputs.minor }}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ steps.latest.outputs.latest == 'true' }}
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.revision=${{ steps.revision.outputs.sha }}
@@ -163,7 +224,6 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
             REVISION=${{ steps.revision.outputs.sha }}
             CREATED=${{ steps.version.outputs.created }}
-          cache-from: type=gha,scope=image
 
       - name: Skip the attestation in a private repository
         if: ${{ github.event.repository.private }}

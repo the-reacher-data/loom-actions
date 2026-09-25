@@ -39,6 +39,7 @@ jobs:
     uses: the-reacher-data/loom-actions/.github/workflows/image-release.yml@0000000000000000000000000000000000000000
     with:
       version: ${{ needs.release.outputs.version }}
+      expected-sha: ${{ github.event.pull_request.merge_commit_sha || inputs.merge_sha }}
       ghcr-image: ghcr.io/acme/app
       dockerhub-image: acme/app
       platforms: "linux/amd64,linux/arm64"

@@ -8,6 +8,7 @@ repository the pushed digest gets a build provenance attestation.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,8 @@ import workflow_steps as wf
 NAME = "image-release"
 GUARD = "Require a release version"
 CREDENTIALS = "Require the Docker Hub credentials"
+ANCESTRY = "Require the release commit on the default branch"
+LATEST = "Decide whether latest moves"
 PUBLIC = "!github.event.repository.private"
 
 
@@ -39,6 +42,7 @@ class TestInputs:
             ("platforms", "linux/amd64"),
             ("image-context", "."),
             ("dockerfile", "Dockerfile"),
+            ("expected-sha", ""),
         ],
     )
     def test_optional_inputs_keep_their_defaults(self, name: str, default: object) -> None:
@@ -73,12 +77,19 @@ class TestOrder:
         first_login = next(i for i, t in enumerate(titles) if "login-action" in str(t))
         assert titles.index(CREDENTIALS) < first_login
 
-    def test_the_release_tag_is_checked_out(self) -> None:
+    def test_the_release_tag_is_checked_out_with_every_tag_and_branch(self) -> None:
         checkout = _uses("actions/checkout")
         assert checkout["with"] == {
             "ref": "refs/tags/v${{ inputs.version }}",
+            "fetch-depth": 0,
             "persist-credentials": False,
         }
+
+    def test_the_commit_and_latest_are_decided_before_any_login(self) -> None:
+        titles = [s.get("name") or s.get("uses") for s in wf.steps(NAME, "image")]
+        first_login = next(i for i, t in enumerate(titles) if "login-action" in str(t))
+        assert titles.index(ANCESTRY) < first_login
+        assert titles.index(LATEST) < first_login
 
 
 class TestPublish:
@@ -100,8 +111,24 @@ class TestPublish:
         tags = str(with_["tags"])
         assert "type=raw,value=${{ steps.version.outputs.version }}" in tags
         assert "type=raw,value=${{ steps.version.outputs.minor }}" in tags
-        assert "type=raw,value=latest" in tags
+        assert "type=raw,value=latest,enable=${{ steps.latest.outputs.latest == 'true' }}" in tags
         assert with_["flavor"] == "latest=false"
+
+    def test_the_release_reads_no_shared_layer_cache(self) -> None:
+        text = (wf.WORKFLOWS / f"{NAME}.yml").read_text("utf-8")
+        assert "scope=image" not in text
+        assert "type=gha" not in text
+        build = _uses("docker/build-push-action")["with"]
+        assert isinstance(build, dict)
+        assert "cache-from" not in build
+        assert "cache-to" not in build
+
+    def test_the_builder_images_are_pinned_by_digest(self) -> None:
+        qemu = _uses("docker/setup-qemu-action")
+        buildx = _uses("docker/setup-buildx-action")
+        assert str(qemu["with"]["image"]).startswith("docker.io/tonistiigi/binfmt@sha256:")
+        assert str(buildx["with"]["driver-opts"]).startswith("image=moby/buildkit@sha256:")
+        assert qemu["if"] == "${{ steps.version.outputs.qemu == 'true' }}"
 
     def test_docker_hub_is_opt_in(self) -> None:
         login = [s for s in wf.steps(NAME, "image") if "login-action" in s.get("uses", "")]
@@ -134,7 +161,12 @@ class TestVersionGuard:
     ) -> tuple[int, dict[str, str]]:
         output = tmp_path / "out.txt"
         output.touch()
-        env = {"VERSION": version, "GHCR_IMAGE": image, "GITHUB_OUTPUT": str(output)}
+        env = {
+            "VERSION": version,
+            "GHCR_IMAGE": image,
+            "PLATFORMS": "linux/amd64",
+            "GITHUB_OUTPUT": str(output),
+        }
         done = wf.run(NAME, "image", GUARD, env, tmp_path)
         return done.returncode, _outputs(output)
 
@@ -174,3 +206,120 @@ class TestCredentialsGuard:
     ) -> None:
         env = {"DOCKERHUB_IMAGE": image, "DOCKERHUB_USERNAME": user, "DOCKERHUB_TOKEN": token}
         assert wf.run(NAME, "image", CREDENTIALS, env, tmp_path).returncode == code
+
+
+class TestQemu:
+    @pytest.mark.parametrize(
+        ("platforms", "qemu"),
+        [
+            ("linux/amd64", "false"),
+            (" linux/amd64 ", "false"),
+            ("linux/amd64,linux/arm64", "true"),
+            ("linux/arm64", "true"),
+            ("linux/amd64, linux/amd64", "false"),
+        ],
+    )
+    def test_qemu_only_for_a_foreign_platform(
+        self, tmp_path: Path, platforms: str, qemu: str
+    ) -> None:
+        output = tmp_path / "out.txt"
+        output.touch()
+        env = {
+            "VERSION": "1.2.3",
+            "GHCR_IMAGE": "ghcr.io/acme/app",
+            "PLATFORMS": platforms,
+            "GITHUB_OUTPUT": str(output),
+        }
+        assert wf.run(NAME, "image", GUARD, env, tmp_path).returncode == 0
+        assert _outputs(output)["qemu"] == qemu
+
+
+def _git(repo: Path, *args: str) -> str:
+    done = subprocess.run(
+        ("git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return done.stdout.strip()
+
+
+def _commit(repo: Path, message: str) -> str:
+    _git(repo, "commit", "-q", "--allow-empty", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """master: A - B - C, tagged v1.0.0 (A), v1.1.0 (B), v2.0.0 (C); a side branch off A."""
+    path = tmp_path / "repo"
+    path.mkdir()
+    _git(path, "init", "-q", "-b", "master")
+    for message, tag in (("a", "v1.0.0"), ("b", "v1.1.0"), ("c", "v2.0.0")):
+        _commit(path, message)
+        _git(path, "tag", tag)
+    _git(path, "update-ref", "refs/remotes/origin/master", "HEAD")
+    _git(path, "checkout", "-q", "-b", "side", "v1.0.0")
+    _commit(path, "side")
+    _git(path, "tag", "v1.0.1")
+    _git(path, "checkout", "-q", "v1.1.0")
+    _commit(path, "hotfix on the old line")
+    _git(path, "tag", "v1.1.1")
+    _git(path, "checkout", "-q", "master")
+    return path
+
+
+def _run_in(repo: Path, title: str, tag: str, **env: str) -> tuple[int, str, dict[str, str]]:
+    _git(repo, "checkout", "-q", tag)
+    output = repo.parent / "out.txt"
+    output.write_text("", encoding="utf-8")
+    done = wf.run(NAME, "image", title, {"GITHUB_OUTPUT": str(output), **env}, repo)
+    return done.returncode, done.stdout, _outputs(output)
+
+
+class TestReleaseCommit:
+    def _check(self, repo: Path, tag: str, expected: str = "", branch: str = "master"):
+        return _run_in(repo, ANCESTRY, tag, DEFAULT_BRANCH=branch, EXPECTED_SHA=expected)
+
+    def test_a_tag_on_the_default_branch_passes(self, repo: Path) -> None:
+        code, _, outputs = self._check(repo, "v1.1.0")
+        assert code == 0
+        assert outputs["sha"] == _git(repo, "rev-parse", "v1.1.0^{commit}")
+
+    def test_a_tag_off_the_default_branch_fails(self, repo: Path) -> None:
+        code, stdout, outputs = self._check(repo, "v1.0.1")
+        assert code != 0
+        assert "::error" in stdout
+        assert outputs == {}
+
+    def test_the_expected_commit_must_match(self, repo: Path) -> None:
+        wanted = _git(repo, "rev-parse", "v2.0.0^{commit}")
+        assert self._check(repo, "v2.0.0", wanted)[0] == 0
+        code, stdout, _ = self._check(repo, "v1.1.0", wanted)
+        assert code != 0
+        assert "::error" in stdout
+
+    @pytest.mark.parametrize("branch", ["", "main"])
+    def test_an_unknown_default_branch_fails(self, repo: Path, branch: str) -> None:
+        assert self._check(repo, "v1.1.0", branch=branch)[0] != 0
+
+
+class TestLatest:
+    @pytest.mark.parametrize(
+        ("tag", "latest"),
+        [("v2.0.0", "true"), ("v1.1.1", "false"), ("v1.0.0", "false")],
+    )
+    def test_latest_moves_only_for_the_highest_version(
+        self, repo: Path, tag: str, latest: str
+    ) -> None:
+        code, _, outputs = _run_in(repo, LATEST, tag, VERSION=tag.removeprefix("v"))
+        assert code == 0
+        assert outputs["latest"] == latest
+
+    def test_a_higher_patch_beats_a_lexically_higher_one(self, repo: Path) -> None:
+        _git(repo, "tag", "v2.0.10", "v2.0.0")
+        _git(repo, "tag", "v2.0.9", "v2.0.0")
+        _git(repo, "tag", "v2.1.0-rc.1", "v2.0.0")
+        code, _, outputs = _run_in(repo, LATEST, "v2.0.10", VERSION="2.0.10")
+        assert code == 0
+        assert outputs["latest"] == "true"
