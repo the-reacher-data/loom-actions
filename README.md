@@ -131,11 +131,17 @@ None of them sets `concurrency`; the caller does. What reaches the caller's own 
 
 - `pages` (the build command) and the `extra-check` job of `repo-security`: a read-only token
   and no secret.
-- `node-ci`: every job only reads; `CODECOV_TOKEN` is passed only to the Codecov upload and the
-  step that checks it is set, both after the tests have run.
-- `image-release`: the job holds `packages: write` and `id-token: write` to push and attest,
-  and runs only the caller's Dockerfile, whose `RUN` steps execute inside BuildKit without the
-  job's token or secrets.
+- `node-ci`: every job only reads. `CODECOV_TOKEN` reaches only the `codecov` job, which runs
+  no npm and none of the caller's scripts: it downloads the lcov the `test` job stored.
+- `image-release`: the caller's Dockerfile is built in the privileged job, the one holding
+  `packages: write`, `id-token: write` and the Docker Hub secrets. Its `RUN` steps execute
+  inside BuildKit without the job's token or secrets, but whatever the Dockerfile and the
+  tagged commit contain ends up in a signed, attested image, so only a reviewed commit on the
+  default branch may be released (see below).
+
+Command inputs (`build-command`, `extra-check-command`, `e2e-command`) are run as shell code.
+Write them as constants in the caller: never build one from `github.head_ref`, a pull request
+title or body, or any other text a contributor controls.
 
 ### node-ci
 
@@ -159,6 +165,7 @@ None of them sets `concurrency`; the caller does. What reaches the caller's own 
 | `workspaces` | always | no `package-lock.json`, a name that is not a workspace, two workspaces in directories with the same name |
 | `lint` | always | `npm ci`, `lint-script` and `typecheck-script` in every workspace (a missing script fails) |
 | `test` | once per workspace | `test-script` (a missing script fails), no lcov at `coverage-file` |
+| `codecov` | once per workspace, `codecov: true` | never: the upload is informational |
 | `build` | `build-script` set | `build-script` where it exists |
 | `e2e` | `e2e-command` set | `npx --no playwright install --with-deps chromium` in `e2e-workspace-dir`, then the command |
 | `gate` | always | any job above failed or was cancelled |
@@ -167,8 +174,9 @@ None of them sets `concurrency`; the caller does. What reaches the caller's own 
   through `package-lock.json`; empty runs the scripts in the root project.
 - The `SF:` paths of each lcov are rewritten relative to the repository root
   (`src/a.ts` in `packages/core` becomes `packages/core/src/a.ts`), stored as the artifact
-  `coverage-<dir>` and, with `codecov: true`, uploaded with the flag `<dir>`: the basename of
-  the workspace directory (`core`, `web`). The upload never fails the run.
+  `coverage-<dir>` and, with `codecov: true`, uploaded by the `codecov` job with the flag
+  `<dir>`: the basename of the workspace directory (`core`, `web`). The upload never fails the
+  run.
 - Playwright comes from the lockfile: `npx --no` refuses to download another version.
 
 ### repo-security
@@ -199,6 +207,10 @@ None of them sets `concurrency`; the caller does. What reaches the caller's own 
 
 - In a private repository CodeQL and the dependency review need GitHub Advanced Security, so
   their jobs leave a notice and pass.
+- On a pull request gitleaks reads its configuration (`gitleaks-config`, or `.gitleaks.toml`)
+  and `.gitleaksignore` from the base branch, never from the head, so a pull request cannot
+  allowlist its own finding; without them on the base, the default rules apply. On a push it
+  reads them from the commit scanned.
 - `extra-check-command` runs with `bash -euo pipefail`, no secret and a checkout that keeps no
   token. `extra-check-python-version` installs uv and a virtualenv of that Python first on
   `PATH` (outside the workspace); `extra-check-node-version` installs Node.js.
@@ -215,6 +227,7 @@ None of them sets `concurrency`; the caller does. What reaches the caller's own 
       python-version: "3.12"
       build-command: "uv sync --locked && uv run --locked sphinx-build -W -b html docs docs/_build/html"
       output-dir: docs/_build/html
+      fetch-depth: 0 # the version is read from the git tags
 
   deploy:
     needs: docs
@@ -235,8 +248,12 @@ None of them sets `concurrency`; the caller does. What reaches the caller's own 
   `output-dir/index.html` is missing. It never deploys: `pages: write` and `id-token: write`
   belong to the caller's deploy job, which runs none of the build's code.
 - `deploy: true` uploads the site as the Pages artifact and sets the output
-  `pages-artifact` to `true`; in a private repository it leaves a notice instead. With
-  `deploy: false` (a pull request) it only builds.
+  `pages-artifact` to `true`, only on the default branch of a public repository; elsewhere it
+  leaves a notice instead. With `deploy: false` (a pull request) it only builds.
+- A build with `deploy: true` restores no uv cache, so nothing a pull request saved reaches a
+  published site.
+- `fetch-depth` (1 by default) is passed to the checkout; 0 brings the tags a version read from
+  git needs.
 
 ### image-release
 
@@ -252,6 +269,7 @@ None of them sets `concurrency`; the caller does. What reaches the caller's own 
     uses: the-reacher-data/loom-actions/.github/workflows/image-release.yml@<sha> # vX.Y.Z
     with:
       version: ${{ needs.release.outputs.version }}
+      expected-sha: ${{ github.event.pull_request.merge_commit_sha || inputs.merge_sha }}
       ghcr-image: ghcr.io/acme/app
       dockerhub-image: acme/app
       platforms: "linux/amd64,linux/arm64"
@@ -263,10 +281,19 @@ None of them sets `concurrency`; the caller does. What reaches the caller's own 
 - It stops before anything else unless `version` matches `^[0-9]+\.[0-9]+\.[0-9]+$` and
   `ghcr-image` is a lowercase `ghcr.io/...` name, and when `dockerhub-image` is set without
   both Docker Hub secrets.
-- It builds the tag `v<version>`, not the commit that started the run, and pushes `X.Y.Z`,
-  `X.Y` and `latest` to GHCR and, optionally, Docker Hub, with the build args `VERSION`,
-  `REVISION` (the tagged commit) and `CREATED`, an SBOM and `provenance: mode=max`. The layer
-  cache is read from `python-service-ci` (`scope=image`).
+- It builds the tag `v<version>`, not the commit that started the run, and refuses it unless
+  the tagged commit is on the default branch and, when `expected-sha` is passed, is exactly
+  that commit.
+- It pushes `X.Y.Z` and `X.Y` to GHCR and, optionally, Docker Hub, and `latest` only when
+  `v<version>` is the highest `vX.Y.Z` tag, so a patch to an older line leaves `latest` alone.
+  The build args are `VERSION`, `REVISION` (the tagged commit) and `CREATED`, with an SBOM and
+  `provenance: mode=max`.
+- It reads no layer cache: the `gha` cache pull requests write is never trusted by a signed
+  release. The binfmt and BuildKit images are pinned by digest; QEMU is set up only for a
+  platform other than `linux/amd64`.
+- Protect the `v*` tags with a repository ruleset (restrict creation, update and deletion to
+  the release automation). The ancestry check stops a tag on a side branch, not one moved to
+  another commit of the default branch; `expected-sha` covers that for the caller that passes it.
 - In a public repository the digest gets a build provenance attestation pushed to the
   registry (`gh attestation verify oci://ghcr.io/acme/app:X.Y.Z --repo <owner>/<repo>
   --signer-repo the-reacher-data/loom-actions`); in a private one, a notice. No storage record
